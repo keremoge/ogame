@@ -221,7 +221,7 @@ export class GameScene extends Phaser.Scene {
     this.messageText = this.add.text(viewW / 2, viewH / 2 - 40, '', {
       font: 'bold 36px monospace', color: '#ffeb3b',
       stroke: '#000', strokeThickness: 6, align: 'center',
-    }).setOrigin(0.5).setScrollFactor(0).setDepth(100);
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(200);
 
     // On-screen Restart button (always present, becomes prominent at game over).
     this.restartBtn = this.add.text(viewW / 2, viewH / 2 + 40, '↻ YENİDEN BAŞLA', {
@@ -232,7 +232,7 @@ export class GameScene extends Phaser.Scene {
     })
       .setOrigin(0.5)
       .setScrollFactor(0)
-      .setDepth(100)
+      .setDepth(200)
       .setInteractive({ useHandCursor: true })
       .setVisible(false);
     this.restartBtn.on('pointerdown', () => this._doRestart());
@@ -570,15 +570,53 @@ export class GameScene extends Phaser.Scene {
       this.score += 2;
       this._updateScoreText();
       this._sfx('stomp');
-    } else {
-      this._sfx('hurt');
-      this._endGame('Eyvah!\nR ile yeniden başla');
+      return;
     }
+
+    // Damage taken: short invulnerability so we don't re-trigger every frame.
+    if (this._invulnUntil && this.time.now < this._invulnUntil) return;
+    this._invulnUntil = this.time.now + 1100;
+
+    this._sfx('hurt');
+    // Knockback away from the enemy.
+    const dir = player.x < enemy.x ? -1 : 1;
+    player.setVelocity(220 * dir, -260);
+
+    if (this.score > 0) {
+      this.score -= 1;
+      this._updateScoreText();
+      this._flashDamage();
+    } else {
+      // No apples left to lose -> game over.
+      this._endGame(this._isTouch ? 'Eyvah!' : 'Eyvah!\nR ile yeniden başla');
+    }
+  }
+
+  _flashDamage() {
+    // Translucent red overlay on the player + head, blinking a few times.
+    const targets = [this.player, this.playerHead].filter(Boolean);
+    targets.forEach((t) => t.setTintFill(0xff3030));
+    const blinks = 6;
+    let count = 0;
+    const ev = this.time.addEvent({
+      delay: 90, repeat: blinks - 1,
+      callback: () => {
+        count += 1;
+        const on = count % 2 === 1;
+        targets.forEach((t) => t.setAlpha(on ? 0.55 : 1));
+      },
+    });
+    this.time.delayedCall(blinks * 90 + 40, () => {
+      ev.remove();
+      targets.forEach((t) => { t.clearTint(); t.setAlpha(1); });
+      if (this.playerHead) this.playerHead.setTint(this.gameOver ? 0xbbbbbb : 0xffffff);
+    });
   }
 
   _reachGoal() {
     this._sfx('win');
-    this._endGame('Tebrikler!\nElma: ' + this.score + '\nR ile tekrar oyna');
+    const hint = this._isTouch ? '' : '\nR ile tekrar oyna';
+    this._endGame('Tebrikler!\nElma: ' + this.score + hint);
   }
 
   _endGame(text) {
@@ -589,6 +627,11 @@ export class GameScene extends Phaser.Scene {
     this.physics.pause();
     this.messageText.setText(text);
     this.restartBtn.setVisible(true);
+    // Make sure the on-screen tap-jump zone doesn't eat the restart click.
+    if (this.tapZone) this.tapZone.disableInteractive();
+    if (this.touchBtnLeft)  this.touchBtnLeft._hit.disableInteractive();
+    if (this.touchBtnRight) this.touchBtnRight._hit.disableInteractive();
+    if (this.touchBtnJump)  this.touchBtnJump._hit.disableInteractive();
   }
 
   _handleResize(gameSize) {
@@ -664,6 +707,7 @@ export class GameScene extends Phaser.Scene {
     const isTouch =
       ('ontouchstart' in window) ||
       (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+    this._isTouch = !!isTouch;
     if (!isTouch) {
       [this.touchBtnLeft, this.touchBtnRight, this.touchBtnJump, this.tapZone]
         .forEach((o) => o.setVisible(false));
