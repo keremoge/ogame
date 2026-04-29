@@ -86,18 +86,22 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
-    // --- Apples. Drawn 4× larger than the source texture so they really
-    // pop against the world.
+    // --- Vitamins (mixed fruit & veg). Textures are drawn at 64x64 so
+    // they stay crisp without any upscaling.
     this.apples = this.physics.add.group({ allowGravity: false, immovable: true });
-    const APPLE_SCALE = 4;
+    const FRUIT_KEYS = [
+      'apple', 'banana', 'orange', 'strawberry', 'grapes',
+      'watermelon', 'carrot', 'tomato', 'eggplant', 'pear', 'broccoli',
+    ];
+    const randFruit = () => FRUIT_KEYS[Phaser.Math.Between(0, FRUIT_KEYS.length - 1)];
 
-    // Apples that sit on top of the existing benches.
+    // Vitamins that sit on top of the existing benches.
     benches.forEach(([px, py, len]) => {
       const ax = px + Math.floor(len / 2) * 32;
-      const ay = py - 36; // lifted higher so the bigger apple sits cleanly on the bench
-      const apple = this.apples.create(ax, ay, 'apple');
-      apple.setScale(APPLE_SCALE);
-      apple.body.setSize(16, 16).setOffset(0, 0);
+      const ay = py - 26; // lifted so the sprite sits cleanly on the bench
+      const apple = this.apples.create(ax, ay, randFruit());
+      apple.setScale(0.5);
+      apple.body.setSize(48, 48).setOffset(8, 8);
       apple.refreshBody();
       this.tweens.add({
         targets: apple, y: ay - 8, duration: 800,
@@ -105,9 +109,8 @@ export class GameScene extends Phaser.Scene {
       });
     });
 
-    // High-altitude bouncing apples — placed UP IN THE SKY so the player has
-    // to time jumps to catch them. They bob with a larger amplitude and a
-    // bouncier ease, like floating fruit.
+    // High-altitude vitamins — placed UP IN THE SKY so the player has to
+    // time jumps to catch them. They bob with a larger amplitude.
     const skyApples = [
       // Reachable with a normal jump from the ground (~240px max).
       [380,  groundY - 200], [1140, groundY - 210], [1900, groundY - 220],
@@ -115,11 +118,14 @@ export class GameScene extends Phaser.Scene {
       // Higher ones — reachable by jumping off a nearby bench.
       [820,  groundY - 320], [1580, groundY - 340], [2200, groundY - 360],
       [2940, groundY - 330], [3500, groundY - 350],
+      // Even higher, requiring chained bench jumps.
+      [600,  groundY - 430], [1340, groundY - 460], [2400, groundY - 480],
+      [3100, groundY - 450], [3680, groundY - 470],
     ];
     skyApples.forEach(([ax, ay]) => {
-      const apple = this.apples.create(ax, ay, 'apple');
-      apple.setScale(APPLE_SCALE);
-      apple.body.setSize(16, 16).setOffset(0, 0);
+      const apple = this.apples.create(ax, ay, randFruit());
+      apple.setScale(0.5);
+      apple.body.setSize(48, 48).setOffset(8, 8);
       apple.refreshBody();
       // Bigger, springy bob so they look like they're hopping in the air.
       const amp = Phaser.Math.Between(22, 36);
@@ -933,7 +939,7 @@ export class GameScene extends Phaser.Scene {
   _reachGoal() {
     this._sfx('win');
     const hint = this._isTouch ? '' : '\nR ile tekrar oyna';
-    this._endGame('Tebrikler!\nElma: ' + this.score + hint);
+    this._endGame('Tebrikler!\nVitamin: ' + this.score + hint);
   }
 
   _endGame(text) {
@@ -1085,12 +1091,32 @@ export class GameScene extends Phaser.Scene {
     bg.strokeRoundedRect(0, 0, 170, 48, 14);
     panel.add(bg);
 
-    // Apple icon (drawn fresh, larger than the world apple).
+    // Mixed fruit/veg basket icon.
     const ico = this.add.graphics();
-    ico.fillStyle(0xe53935, 1); ico.fillCircle(24, 24, 13);
-    ico.fillStyle(0xff7043, 1); ico.fillCircle(20, 20, 4);
-    ico.fillStyle(0x4e342e, 1); ico.fillRect(23, 10, 2, 5);
-    ico.fillStyle(0x2e7d32, 1); ico.fillRect(25, 11, 6, 3);
+    // Basket
+    ico.fillStyle(0x8d6e63, 1);
+    ico.fillRoundedRect(8, 26, 32, 14, 4);
+    ico.fillStyle(0x6d4c41, 1);
+    ico.fillRect(8, 26, 32, 2);
+    // Basket weave lines
+    ico.lineStyle(1, 0x4e342e, 0.7);
+    for (let i = 12; i < 40; i += 5) ico.lineBetween(i, 28, i, 40);
+    // Red apple (left)
+    ico.fillStyle(0xe53935, 1); ico.fillCircle(15, 22, 6);
+    ico.fillStyle(0xff7043, 1); ico.fillCircle(13, 20, 2);
+    ico.fillStyle(0x2e7d32, 1); ico.fillRect(15, 14, 4, 2);
+    // Orange (middle-back)
+    ico.fillStyle(0xfb8c00, 1); ico.fillCircle(24, 20, 6);
+    ico.fillStyle(0xffa726, 1); ico.fillCircle(22, 18, 2);
+    ico.fillStyle(0x2e7d32, 1); ico.fillTriangle(23, 13, 26, 13, 24, 16);
+    // Banana (right, draped)
+    ico.fillStyle(0xfdd835, 1);
+    ico.fillEllipse(33, 22, 12, 5);
+    ico.fillStyle(0xf9a825, 1);
+    ico.fillEllipse(33, 21, 10, 3);
+    // Grapes peeking
+    ico.fillStyle(0x6a1b9a, 1);
+    [[33,16],[36,17],[34,19]].forEach(([cx,cy]) => ico.fillCircle(cx, cy, 2));
     panel.add(ico);
 
     this.scoreText = this.add.text(50, 24, '0', {
@@ -1099,7 +1125,7 @@ export class GameScene extends Phaser.Scene {
     }).setOrigin(0, 0.5);
     panel.add(this.scoreText);
 
-    const label = this.add.text(86, 24, 'Elma', {
+    const label = this.add.text(86, 24, 'Vitamin', {
       font: 'bold 14px monospace', color: '#ffeb3b',
       stroke: '#000', strokeThickness: 2,
     }).setOrigin(0, 0.5);
@@ -1244,12 +1270,192 @@ export class GameScene extends Phaser.Scene {
     g.generateTexture('bench', 32, 12);
     g.clear();
 
-    // Apple.
-    g.fillStyle(0xe53935, 1); g.fillCircle(8, 9, 6);
-    g.fillStyle(0xff7043, 1); g.fillCircle(6, 7, 2);
-    g.fillStyle(0x4e342e, 1); g.fillRect(7, 1, 2, 3);
-    g.fillStyle(0x2e7d32, 1); g.fillRect(9, 2, 4, 2);
-    g.generateTexture('apple', 16, 16);
+    // ---- Fruit & Veg textures (64×64 — crisp, no upscaling blur) ----
+    const FRUIT_SIZE = 64;
+    const F = FRUIT_SIZE;
+
+    // Apple — bright red with shine and stem.
+    g.fillStyle(0xb71c1c, 1); g.fillCircle(F/2, F/2 + 4, 26);
+    g.fillStyle(0xe53935, 1); g.fillCircle(F/2, F/2 + 4, 22);
+    g.fillStyle(0xff8a65, 1); g.fillCircle(F/2 - 8, F/2 - 4, 8);
+    g.fillStyle(0xffccbc, 1); g.fillCircle(F/2 - 10, F/2 - 6, 4);
+    // Indent at top
+    g.fillStyle(0x8e0000, 1); g.fillEllipse(F/2, F/2 - 18, 10, 5);
+    // Stem
+    g.fillStyle(0x4e342e, 1); g.fillRect(F/2 - 1, 8, 3, 12);
+    // Leaf
+    g.fillStyle(0x2e7d32, 1); g.fillEllipse(F/2 + 8, 14, 14, 7);
+    g.fillStyle(0x66bb6a, 1); g.fillEllipse(F/2 + 6, 13, 8, 3);
+    g.generateTexture('apple', F, F);
+    g.clear();
+
+    // Banana — yellow crescent.
+    g.fillStyle(0xf57f17, 1);
+    g.fillEllipse(F/2, F/2 + 8, 50, 22);
+    g.fillStyle(0xfdd835, 1);
+    g.fillEllipse(F/2, F/2 + 4, 48, 18);
+    g.fillStyle(0xfff176, 1);
+    g.fillEllipse(F/2, F/2, 44, 10);
+    // "Eat" the inner curve so it becomes a crescent.
+    g.fillStyle(0x000000, 0); // we have no eraser; instead, use overpainting trick
+    // Re-cover the top with crescent-cutout via a bigger ellipse offset upward,
+    // matching no background — instead use a crescent shadow band.
+    g.fillStyle(0xf9a825, 1);
+    g.fillEllipse(F/2, F/2 + 16, 46, 10);
+    // Tips and stem
+    g.fillStyle(0x6d4c41, 1);
+    g.fillRect(8, F/2 + 6, 4, 8);
+    g.fillRect(F - 12, F/2 + 6, 4, 8);
+    g.fillRect(F/2 - 2, F/2 - 8, 4, 6);
+    g.generateTexture('banana', F, F);
+    g.clear();
+
+    // Orange.
+    g.fillStyle(0xe65100, 1); g.fillCircle(F/2, F/2 + 4, 26);
+    g.fillStyle(0xfb8c00, 1); g.fillCircle(F/2, F/2 + 4, 23);
+    g.fillStyle(0xffa726, 1); g.fillCircle(F/2 - 7, F/2 - 4, 9);
+    g.fillStyle(0xffe0b2, 1); g.fillCircle(F/2 - 9, F/2 - 6, 4);
+    // Stem hole
+    g.fillStyle(0xbf360c, 1); g.fillCircle(F/2, F/2 - 18, 4);
+    // Leaf
+    g.fillStyle(0x2e7d32, 1); g.fillEllipse(F/2 + 6, 16, 14, 6);
+    g.generateTexture('orange', F, F);
+    g.clear();
+
+    // Strawberry — heart-ish red with seeds and leafy crown.
+    g.fillStyle(0xb71c1c, 1);
+    g.fillTriangle(8, 24, F - 8, 24, F/2, F - 6);
+    g.fillStyle(0xe53935, 1);
+    g.fillTriangle(12, 26, F - 12, 26, F/2, F - 10);
+    // Round shoulders
+    g.fillStyle(0xe53935, 1);
+    g.fillCircle(20, 26, 10);
+    g.fillCircle(F - 20, 26, 10);
+    // Seeds
+    g.fillStyle(0xfff59d, 1);
+    [[20,32],[30,40],[40,32],[24,46],[36,46],[32,52],[44,42]].forEach(([sx,sy]) => {
+      g.fillEllipse(sx, sy, 3, 4);
+    });
+    // Leafy crown
+    g.fillStyle(0x2e7d32, 1);
+    g.fillTriangle(10, 22, 24, 14, 22, 26);
+    g.fillTriangle(22, 22, F/2, 8, 30, 26);
+    g.fillTriangle(F/2, 8, 42, 22, 34, 26);
+    g.fillTriangle(40, 22, F - 10, 22, 42, 26);
+    g.fillStyle(0x66bb6a, 1);
+    g.fillTriangle(F/2 - 4, 12, F/2 + 4, 12, F/2, 22);
+    g.generateTexture('strawberry', F, F);
+    g.clear();
+
+    // Grapes — cluster of purple grapes.
+    const grapePositions = [
+      [22,26],[F/2,26],[42,26],
+      [18,36],[30,36],[42,36],[F-14,36],
+      [24,46],[36,46],[F-18,46],
+      [30,54],[F/2,54],
+    ];
+    g.fillStyle(0x4a148c, 1);
+    grapePositions.forEach(([gx,gy]) => g.fillCircle(gx, gy, 8));
+    g.fillStyle(0x6a1b9a, 1);
+    grapePositions.forEach(([gx,gy]) => g.fillCircle(gx, gy, 6));
+    g.fillStyle(0xab47bc, 1);
+    grapePositions.forEach(([gx,gy]) => g.fillCircle(gx - 2, gy - 2, 2));
+    // Stem + leaf
+    g.fillStyle(0x4e342e, 1); g.fillRect(F/2 - 1, 8, 3, 14);
+    g.fillStyle(0x2e7d32, 1); g.fillEllipse(F/2 + 10, 14, 16, 8);
+    g.generateTexture('grapes', F, F);
+    g.clear();
+
+    // Watermelon slice.
+    g.fillStyle(0x1b5e20, 1); g.fillTriangle(6, F - 14, F - 6, F - 14, F/2, 10);
+    g.fillStyle(0x66bb6a, 1); g.fillTriangle(10, F - 16, F - 10, F - 16, F/2, 14);
+    g.fillStyle(0xfff8e1, 1); g.fillTriangle(13, F - 19, F - 13, F - 19, F/2, 17);
+    g.fillStyle(0xe53935, 1); g.fillTriangle(16, F - 22, F - 16, F - 22, F/2, 22);
+    // Seeds
+    g.fillStyle(0x212121, 1);
+    [[26,40],[F/2,32],[F-26,40],[F/2-8,46],[F/2+8,46],[F/2,52]].forEach(([sx,sy]) => {
+      g.fillEllipse(sx, sy, 4, 6);
+    });
+    g.generateTexture('watermelon', F, F);
+    g.clear();
+
+    // Carrot — orange cone with leafy top.
+    g.fillStyle(0xe65100, 1);
+    g.fillTriangle(16, 22, F - 16, 22, F/2, F - 6);
+    g.fillStyle(0xfb8c00, 1);
+    g.fillTriangle(20, 24, F - 20, 24, F/2, F - 10);
+    // Ridges
+    g.fillStyle(0xef6c00, 1);
+    g.fillRect(28, 32, 8, 2); g.fillRect(F/2 - 4, 42, 8, 2); g.fillRect(F/2 - 2, 50, 4, 2);
+    // Leaves
+    g.fillStyle(0x2e7d32, 1);
+    g.fillTriangle(14, 24, 26, 24, 16, 4);
+    g.fillTriangle(22, 24, 38, 24, F/2, 0);
+    g.fillTriangle(F - 26, 24, F - 14, 24, F - 16, 4);
+    g.fillStyle(0x66bb6a, 1);
+    g.fillTriangle(20, 24, 28, 24, 22, 10);
+    g.fillTriangle(F - 28, 24, F - 20, 24, F - 22, 10);
+    g.generateTexture('carrot', F, F);
+    g.clear();
+
+    // Tomato.
+    g.fillStyle(0x8b0000, 1); g.fillCircle(F/2, F/2 + 4, 26);
+    g.fillStyle(0xc62828, 1); g.fillCircle(F/2, F/2 + 4, 23);
+    g.fillStyle(0xe53935, 1); g.fillCircle(F/2 - 8, F/2 - 4, 9);
+    g.fillStyle(0xff8a80, 1); g.fillCircle(F/2 - 10, F/2 - 6, 4);
+    // Crown of leaves
+    g.fillStyle(0x2e7d32, 1);
+    g.fillTriangle(F/2 - 14, 18, F/2 + 14, 18, F/2, 28);
+    g.fillTriangle(F/2 - 16, 14, F/2 - 4, 14, F/2 - 10, 4);
+    g.fillTriangle(F/2 - 6, 14, F/2 + 6, 14, F/2, 0);
+    g.fillTriangle(F/2 + 4, 14, F/2 + 16, 14, F/2 + 10, 4);
+    g.generateTexture('tomato', F, F);
+    g.clear();
+
+    // Eggplant — purple oval with green crown.
+    g.fillStyle(0x4a148c, 1); g.fillEllipse(F/2, F/2 + 8, 36, 46);
+    g.fillStyle(0x6a1b9a, 1); g.fillEllipse(F/2, F/2 + 10, 32, 42);
+    g.fillStyle(0x9c27b0, 1); g.fillEllipse(F/2 - 6, F/2 - 4, 10, 18);
+    g.fillStyle(0xce93d8, 1); g.fillEllipse(F/2 - 8, F/2 - 8, 4, 8);
+    // Stem & calyx
+    g.fillStyle(0x2e7d32, 1);
+    g.fillTriangle(F/2 - 16, 16, F/2 + 16, 16, F/2, 30);
+    g.fillRect(F/2 - 2, 4, 4, 14);
+    g.fillStyle(0x66bb6a, 1);
+    g.fillTriangle(F/2 - 10, 18, F/2 + 10, 18, F/2, 26);
+    g.generateTexture('eggplant', F, F);
+    g.clear();
+
+    // Pear — yellow-green teardrop.
+    g.fillStyle(0x558b2f, 1); g.fillCircle(F/2, F - 18, 22);
+    g.fillStyle(0x9ccc65, 1); g.fillCircle(F/2, F - 18, 19);
+    g.fillStyle(0x558b2f, 1); g.fillCircle(F/2, F/2 - 4, 14);
+    g.fillStyle(0x9ccc65, 1); g.fillCircle(F/2, F/2 - 4, 11);
+    g.fillStyle(0xdcedc8, 1); g.fillCircle(F/2 - 6, F/2 - 8, 5);
+    // Stem & leaf
+    g.fillStyle(0x4e342e, 1); g.fillRect(F/2 - 2, 8, 4, 12);
+    g.fillStyle(0x2e7d32, 1); g.fillEllipse(F/2 + 10, 16, 14, 7);
+    g.generateTexture('pear', F, F);
+    g.clear();
+
+    // Broccoli — green florets on a pale stalk.
+    // Stalk
+    g.fillStyle(0xc5e1a5, 1); g.fillRect(F/2 - 8, 36, 16, F - 40);
+    g.fillStyle(0x9ccc65, 1); g.fillRect(F/2 - 4, 36, 8, F - 40);
+    // Florets
+    g.fillStyle(0x1b5e20, 1);
+    [[18,28],[30,18],[F/2,12],[42,18],[F-18,28],[26,32],[F-26,32],[F/2,32]].forEach(([fx,fy]) => {
+      g.fillCircle(fx, fy, 11);
+    });
+    g.fillStyle(0x2e7d32, 1);
+    [[18,28],[30,18],[F/2,12],[42,18],[F-18,28],[26,32],[F-26,32],[F/2,32]].forEach(([fx,fy]) => {
+      g.fillCircle(fx, fy, 8);
+    });
+    g.fillStyle(0x66bb6a, 1);
+    [[18,28],[30,18],[F/2,12],[42,18],[F-18,28]].forEach(([fx,fy]) => {
+      g.fillCircle(fx - 2, fy - 2, 3);
+    });
+    g.generateTexture('broccoli', F, F);
     g.clear();
 
     // Rival — a spiked rolling dodgeball (no eyes, no face). Designed to read
