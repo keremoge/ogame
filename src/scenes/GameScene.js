@@ -1088,10 +1088,29 @@ export class GameScene extends Phaser.Scene {
       } catch { return; }
     }
     const ctx = this._audioCtx;
-    if (ctx.state === 'suspended') ctx.resume();
 
-    const now = ctx.currentTime;
+    // Chrome on PC keeps the context "suspended" on HTTPS until a real
+    // user gesture has resumed it. resume() is async — if we schedule
+    // tones immediately while it's still suspended, they get dropped.
+    // Wait for the resume to settle, THEN play.
+    const play = () => this._playSfx(kind);
+    if (ctx.state === 'suspended') {
+      const p = ctx.resume();
+      if (p && typeof p.then === 'function') p.then(play, play);
+      else play();
+    } else {
+      play();
+    }
+  }
+
+  _playSfx(kind) {
+    const ctx = this._audioCtx;
+    if (!ctx || ctx.state !== 'running') return;
+
+    // Each tone reads ctx.currentTime FRESH so that audio scheduled across
+    // multiple ticks always lands in the future.
     const tone = (freq, dur, type = 'square', vol = 0.18, slideTo = null) => {
+      const now = ctx.currentTime;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = type;
@@ -1123,6 +1142,7 @@ export class GameScene extends Phaser.Scene {
         tone(900, 0.05, 'square', 0.22, 220);
         // Brief noise burst layered on top.
         try {
+          const noiseNow = ctx.currentTime;
           const buf = ctx.createBuffer(1, ctx.sampleRate * 0.08, ctx.sampleRate);
           const data = buf.getChannelData(0);
           for (let i = 0; i < data.length; i++) {
@@ -1131,10 +1151,10 @@ export class GameScene extends Phaser.Scene {
           const src = ctx.createBufferSource();
           src.buffer = buf;
           const ng = ctx.createGain();
-          ng.gain.setValueAtTime(0.18, now);
-          ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+          ng.gain.setValueAtTime(0.18, noiseNow);
+          ng.gain.exponentialRampToValueAtTime(0.0001, noiseNow + 0.08);
           src.connect(ng).connect(ctx.destination);
-          src.start(now);
+          src.start(noiseNow);
         } catch { /* noise buffer optional */ }
         break;
       }
