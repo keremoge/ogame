@@ -83,10 +83,13 @@ export class GameScene extends Phaser.Scene {
 
     // ---- Sky towers between graduation and the finish line ----
     // Stacked zig-zag bench platforms so the player can climb really high
-    // in the NASA / post-graduation stretch. Vertical gap ~120 px is well
-    // within the player's jump arc (~240 px apex). The towers are spread
-    // EVENLY between graduation and the finish line so there's never a long
-    // empty stretch at the end of the level.
+    // in the NASA / post-graduation stretch. The player's jump apex is
+    // ~245 px (JUMP_VELOCITY -700, gravity 1000), so the FIRST tier must
+    // sit well within that height from the ground, and tier-to-tier gaps
+    // must also stay below 240 px. We use 180 px for the first tier and
+    // 120 px gaps for the rest. Towers are spread EVENLY between
+    // graduation and the finish line so there's never a long empty
+    // stretch at the end of the level.
     const gradX = (this._graduateAtX != null) ? this._graduateAtX : worldWidth * 0.55;
     const finishX = worldWidth - 100;
     const span = finishX - gradX;
@@ -102,13 +105,15 @@ export class GameScene extends Phaser.Scene {
         const dir = (i % 2 === 0) ? 1 : -1;
         const xLeft = baseX;
         const xRight = baseX + 100 * dir;
-        // 4 stacked tiers + a wider top platform.
+        // 5 stacked tiers + a wider top platform. First tier is reachable
+        // from the ground (jump apex ~245 px), each next tier 120 px up.
         benches.push(
-          [xLeft,  groundY - 320, 2],
-          [xRight, groundY - 440, 2],
-          [xLeft,  groundY - 560, 2],
-          [xRight, groundY - 680, 2],
-          [Math.round(baseX + 20 * dir), groundY - 800, 3],
+          [xLeft,  groundY - 180, 2],
+          [xRight, groundY - 300, 2],
+          [xLeft,  groundY - 420, 2],
+          [xRight, groundY - 540, 2],
+          [xLeft,  groundY - 660, 2],
+          [Math.round(baseX + 20 * dir), groundY - 780, 3],
         );
       }
     }
@@ -970,8 +975,69 @@ export class GameScene extends Phaser.Scene {
 
   _reachGoal() {
     this._sfx('win');
+    // Bonus mega-confetti if the player reached the flag without losing
+    // a SINGLE balloon — a perfect run!
+    if (this.balloons && this.balloons.length >= 10) {
+      this._megaConfetti();
+    }
     const hint = this._isTouch ? '' : '\nR ile tekrar oyna';
     this._endGame('Tebrikler!\nVitamin: ' + this.score + hint);
+  }
+
+  // Screen-wide confetti shower for a perfect (no-pop) finish.
+  _megaConfetti() {
+    const cam = this.cameras.main;
+    const left = cam.scrollX;
+    const top = cam.scrollY;
+    const w = cam.width;
+    const h = cam.height;
+    const colors = [0xff3b30, 0xffcc00, 0x34c759, 0x00c7ff, 0xff2d92,
+                    0xaf52de, 0xffffff, 0xff8c00, 0x00e0a4];
+    // Three waves so the screen keeps erupting for ~2 seconds.
+    for (let wave = 0; wave < 3; wave++) {
+      this.time.delayedCall(wave * 350, () => {
+        for (let i = 0; i < 90; i++) {
+          const sx = left + Phaser.Math.Between(0, w);
+          const sy = top + Phaser.Math.Between(-40, h * 0.4);
+          const c = colors[Phaser.Math.Between(0, colors.length - 1)];
+          const conf = this.add.rectangle(
+            sx, sy,
+            Phaser.Math.Between(4, 9),
+            Phaser.Math.Between(8, 18),
+            c,
+          ).setDepth(20).setRotation(Phaser.Math.FloatBetween(0, Math.PI * 2));
+          this.tweens.add({
+            targets: conf,
+            x: sx + Phaser.Math.Between(-120, 120),
+            y: top + h + Phaser.Math.Between(20, 80),
+            alpha: 0,
+            angle: Phaser.Math.Between(-900, 900),
+            duration: Phaser.Math.Between(1400, 2400),
+            ease: 'Sine.In',
+            onComplete: () => conf.destroy(),
+          });
+        }
+        // Sparkle stars sprinkled across the screen too.
+        for (let i = 0; i < 30; i++) {
+          const sx = left + Phaser.Math.Between(0, w);
+          const sy = top + Phaser.Math.Between(0, h);
+          const star = this.add.star(sx, sy, 5, 2, 6, 0xffffff)
+            .setDepth(21).setScale(0);
+          this.tweens.add({
+            targets: star, scale: Phaser.Math.FloatBetween(0.7, 1.3),
+            duration: 160, ease: 'Back.Out',
+            delay: Phaser.Math.Between(0, 200),
+            onComplete: () => {
+              this.tweens.add({
+                targets: star, scale: 0, alpha: 0,
+                duration: 240, ease: 'Quad.In',
+                onComplete: () => star.destroy(),
+              });
+            },
+          });
+        }
+      });
+    }
   }
 
   _endGame(text) {
