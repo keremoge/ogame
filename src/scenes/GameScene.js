@@ -195,8 +195,43 @@ export class GameScene extends Phaser.Scene {
       }
     };
     document.addEventListener('keydown', this._domRestartHandler, true);
+
+    // ---- Audio unlock ----------------------------------------------------
+    // Browsers (especially iOS Safari and HTTPS contexts like GitHub Pages)
+    // require the AudioContext to be created/resumed inside a *real* user
+    // gesture event. We attach a one-shot listener that runs on the very
+    // first pointerdown / touchstart / keydown anywhere in the document.
+    this._unlockAudio = () => {
+      try {
+        if (!this._audioCtx) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (Ctx) this._audioCtx = new Ctx();
+        }
+        if (this._audioCtx && this._audioCtx.state === 'suspended') {
+          this._audioCtx.resume();
+        }
+        // Play a 1-sample silent buffer to fully unlock on iOS.
+        if (this._audioCtx) {
+          const buf = this._audioCtx.createBuffer(1, 1, 22050);
+          const src = this._audioCtx.createBufferSource();
+          src.buffer = buf;
+          src.connect(this._audioCtx.destination);
+          src.start(0);
+        }
+      } catch { /* ignore */ }
+      document.removeEventListener('pointerdown', this._unlockAudio, true);
+      document.removeEventListener('touchstart', this._unlockAudio, true);
+      document.removeEventListener('keydown', this._unlockAudio, true);
+    };
+    document.addEventListener('pointerdown', this._unlockAudio, true);
+    document.addEventListener('touchstart', this._unlockAudio, true);
+    document.addEventListener('keydown', this._unlockAudio, true);
+
     this.events.once('shutdown', () => {
       document.removeEventListener('keydown', this._domRestartHandler, true);
+      document.removeEventListener('pointerdown', this._unlockAudio, true);
+      document.removeEventListener('touchstart', this._unlockAudio, true);
+      document.removeEventListener('keydown', this._unlockAudio, true);
       this.scale.off('resize', this._handleResize, this);
     });
 
