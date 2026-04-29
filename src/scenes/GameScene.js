@@ -79,6 +79,29 @@ export class GameScene extends Phaser.Scene {
       [2800, groundY - 140, 3], [3060, groundY - 200, 3],
       [3320, groundY - 260, 4], [3600, groundY - 150, 3],
       [3880, groundY - 210, 3],
+
+      // ---- Sky towers between graduation and the finish line ----
+      // Stacked zig-zag bench platforms so the player can climb really high
+      // in the NASA / post-graduation stretch. Vertical gap ~120 px is well
+      // within the player's jump arc (~240 px apex).
+      // Tower A — just past graduation.
+      [2360, groundY - 320, 2], [2460, groundY - 440, 2],
+      [2360, groundY - 560, 2], [2460, groundY - 680, 2],
+      [2380, groundY - 800, 3],
+
+      // Tower B — mid stretch.
+      [2920, groundY - 350, 2], [3020, groundY - 470, 2],
+      [2920, groundY - 590, 2], [3020, groundY - 710, 2],
+      [2940, groundY - 830, 3],
+
+      // Tower C — late stretch.
+      [3450, groundY - 320, 2], [3550, groundY - 440, 2],
+      [3450, groundY - 560, 2], [3550, groundY - 680, 2],
+      [3470, groundY - 800, 3],
+
+      // Tower D — final climb before the flag.
+      [3920, groundY - 310, 2], [4020, groundY - 430, 2],
+      [3920, groundY - 550, 2], [4010, groundY - 670, 3],
     ];
     benches.forEach(([px, py, len]) => {
       for (let i = 0; i < len; i++) {
