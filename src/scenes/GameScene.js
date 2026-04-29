@@ -281,6 +281,18 @@ export class GameScene extends Phaser.Scene {
     const onGround = this.player.body.blocked.down || this.player.body.touching.down;
     if (onGround) this.lastGroundedAt = time;
 
+    // Detect landing: was airborne last frame, on ground this frame, and was
+    // moving downward fast. Used by the balloons to add a small downward dip
+    // (impulse through taut strings) when the player thumps onto the ground.
+    const wasAir = this._wasAirborne === true;
+    this._wasAirborne = !onGround;
+    if (onGround && wasAir && (this._prevVy || 0) > 220) {
+      // Store impulse magnitude (px/s of downward kick) for one frame so
+      // _updateBalloons can consume it.
+      this._landingImpulse = Phaser.Math.Clamp((this._prevVy - 100) * 0.45, 0, 320);
+    }
+    this._prevVy = this.player.body.velocity.y;
+
     const left = this.cursors.left.isDown || this.keys.A.isDown || this.touch.left;
     const right = this.cursors.right.isDown || this.keys.D.isDown || this.touch.right;
     if (left && !right) {
@@ -488,6 +500,13 @@ export class GameScene extends Phaser.Scene {
     this.balloonStrings.clear();
     this.balloonStrings.lineStyle(1.5, 0xffffff, 0.95);
 
+    // Consume any one-shot landing impulse from the player. This is added
+    // ONLY to balloons whose string is currently taut, mimicking a real
+    // jolt being transmitted through a tight string when the player thumps
+    // onto the ground after a jump.
+    const landingKick = this._landingImpulse || 0;
+    this._landingImpulse = 0;
+
     // Hand anchor: at the actual drawn HAND position on the body texture.
     // The right hand is at (player.x + HAND_DX, player.y + HAND_DY); when the
     // sprite is flipped horizontally we mirror to the left hand.
@@ -504,6 +523,12 @@ export class GameScene extends Phaser.Scene {
       const dist = Math.max(0.0001, Math.hypot(dx, dy));
       const nx = dx / dist;
       const ny = dy / dist;
+
+      // If string is taut at the moment of landing, transmit a small
+      // downward impulse to the balloon so it dips with some inertia.
+      if (landingKick > 0 && dist >= b.length * 0.96) {
+        b.vel.y += landingKick * Phaser.Math.FloatBetween(0.85, 1.15);
+      }
 
       const stretch = dist - b.length;
       const springMag = stretch > 0 ? -this.BALLOON_STIFF * stretch : 0;
