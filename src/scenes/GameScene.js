@@ -668,9 +668,11 @@ export class GameScene extends Phaser.Scene {
     this._landingImpulse = 0;
 
     // Hand anchor: at the actual drawn HAND position on the body texture.
-    // The right hand is at (player.x + HAND_DX, player.y + HAND_DY); when the
-    // sprite is flipped horizontally we mirror to the left hand.
-    const dirX = this.player.flipX ? -1 : 1;
+    // We anchor the balloons to the HAND BEHIND the direction of motion
+    // (so when the player walks right, the strings come from the left/back
+    // hand, and vice versa). This matches how a kid running with balloons
+    // would naturally trail them behind.
+    const dirX = this.player.flipX ? 1 : -1;
     const handBaseX = this.player.x + dirX * this.HAND_DX;
     const handBaseY = this.player.y + this.HAND_DY;
 
