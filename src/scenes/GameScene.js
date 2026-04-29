@@ -147,26 +147,12 @@ export class GameScene extends Phaser.Scene {
       this.playerHead.setScale(this.HEAD_TARGET_W / 96);
     }
 
-    // --- Three helium balloons (red / yellow / blue) on long strings.
-    // handDX is a small lateral spread inside the hand so the three string
-    // ends fan out slightly instead of all starting from one pixel.
+    // --- Helium balloons on long strings. The player starts with 10 of them;
+    // each enemy hit pops one. The set of colors and per-balloon size is
+    // randomized every game so it looks fresh each restart.
     this.balloons = [];
-    const balloonDefs = [
-      { key: 'balloon-red',    handDX: -4, length: 150, color: 0xe53935 },
-      { key: 'balloon-yellow', handDX:  0, length: 165, color: 0xfbc02d },
-      { key: 'balloon-blue',   handDX:  4, length: 180, color: 0x1e88e5 },
-    ];
-    balloonDefs.forEach((def) => {
-      const img = this.add.image(this.player.x, this.player.y - def.length, def.key).setDepth(6);
-      this.balloons.push({
-        img,
-        pos: new Phaser.Math.Vector2(this.player.x + def.handDX, this.player.y - def.length),
-        vel: new Phaser.Math.Vector2(0, 0),
-        length: def.length,
-        handDX: def.handDX,
-      });
-    });
     this.balloonStrings = this.add.graphics().setDepth(5);
+    this._initBalloons(10);
 
     // --- Graduation outfit (gown over body, cap on head). Hidden until the
     // player walks past the NASA launchpad — see _syncOutfit().
@@ -397,6 +383,106 @@ export class GameScene extends Phaser.Scene {
 
   // --- Balloons -----------------------------------------------------------
 
+  _initBalloons(count) {
+    // Curated palette of cheerful balloon colours.
+    const palette = [
+      { main: 0xe53935, hi: 0xff7a6b, knot: 0xb71c1c }, // red
+      { main: 0xfbc02d, hi: 0xfff59d, knot: 0xf57f17 }, // yellow
+      { main: 0x1e88e5, hi: 0x90caf9, knot: 0x0d47a1 }, // blue
+      { main: 0x43a047, hi: 0xa5d6a7, knot: 0x1b5e20 }, // green
+      { main: 0xec407a, hi: 0xf8bbd0, knot: 0xad1457 }, // pink
+      { main: 0x8e24aa, hi: 0xce93d8, knot: 0x4a148c }, // purple
+      { main: 0xff9800, hi: 0xffcc80, knot: 0xe65100 }, // orange
+      { main: 0x00acc1, hi: 0x80deea, knot: 0x006064 }, // cyan
+      { main: 0x7cb342, hi: 0xc5e1a5, knot: 0x33691e }, // lime
+      { main: 0xffffff, hi: 0xeeeeee, knot: 0xbdbdbd }, // white
+      { main: 0x6d4c41, hi: 0xa1887f, knot: 0x3e2723 }, // brown
+      { main: 0xffd54f, hi: 0xfff8e1, knot: 0xff8f00 }, // amber
+    ];
+
+    const g = this.add.graphics();
+    for (let i = 0; i < count; i++) {
+      const def = Phaser.Utils.Array.GetRandom(palette);
+      const key = `balloon-rng-${i}-${Date.now()}`;
+      this._buildBalloonTexture(g, key, def.main, def.hi, def.knot);
+
+      const scale  = Phaser.Math.FloatBetween(0.85, 1.35); // some bigger / smaller
+      const length = Phaser.Math.Between(140, 220);
+      const handDX = Phaser.Math.Between(-12, 12);
+
+      const img = this.add.image(this.player.x, this.player.y - length, key)
+        .setDepth(6)
+        .setScale(scale);
+      this.balloons.push({
+        img, scale, color: def.main,
+        pos: new Phaser.Math.Vector2(this.player.x + handDX, this.player.y - length),
+        vel: new Phaser.Math.Vector2(0, 0),
+        length, handDX,
+      });
+    }
+    g.destroy();
+  }
+
+  _popOneBalloon() {
+    if (this.balloons.length === 0) return;
+    // Pop the LAST balloon (newest in hand) for a nice visual flow.
+    const b = this.balloons.pop();
+    const x = b.pos.x, y = b.pos.y, color = b.color, scale = b.scale;
+
+    // Balloon rapidly stretches and fades.
+    this.tweens.add({
+      targets: b.img,
+      scale: scale * 1.7, alpha: 0,
+      duration: 130, ease: 'Quad.Out',
+      onComplete: () => b.img.destroy(),
+    });
+
+    // Burst of small coloured shards flying outward + falling.
+    const N = 16;
+    for (let i = 0; i < N; i++) {
+      const ang = (i / N) * Math.PI * 2 + Phaser.Math.FloatBetween(-0.25, 0.25);
+      const speed = Phaser.Math.Between(90, 220);
+      const piece = this.add.rectangle(
+        x, y,
+        Phaser.Math.Between(4, 8),
+        Phaser.Math.Between(2, 5),
+        color,
+      ).setDepth(8).setRotation(ang);
+      this.tweens.add({
+        targets: piece,
+        x: x + Math.cos(ang) * speed,
+        y: y + Math.sin(ang) * speed + Phaser.Math.Between(40, 90), // gravity-like droop
+        alpha: 0,
+        angle: Phaser.Math.Between(-360, 360),
+        scaleX: 0.3, scaleY: 0.3,
+        duration: Phaser.Math.Between(450, 700),
+        ease: 'Quad.Out',
+        onComplete: () => piece.destroy(),
+      });
+    }
+
+    // White flash ring.
+    const ring = this.add.circle(x, y, 6, 0xffffff, 0.85).setDepth(7);
+    this.tweens.add({
+      targets: ring, radius: 26, alpha: 0,
+      duration: 220, ease: 'Quad.Out',
+      onComplete: () => ring.destroy(),
+    });
+
+    // "POP!" text.
+    const pop = this.add.text(x, y - 4, 'POP!', {
+      font: 'bold 22px monospace', color: '#ffeb3b',
+      stroke: '#000', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(9);
+    this.tweens.add({
+      targets: pop, y: y - 30, alpha: 0, scale: 1.4,
+      duration: 380, ease: 'Quad.Out',
+      onComplete: () => pop.destroy(),
+    });
+
+    this._sfx('pop');
+  }
+
   _updateBalloons(dtRaw) {
     const dt = Math.min(dtRaw, 0.033);
     this.balloonStrings.clear();
@@ -577,17 +663,23 @@ export class GameScene extends Phaser.Scene {
     if (this._invulnUntil && this.time.now < this._invulnUntil) return;
     this._invulnUntil = this.time.now + 1100;
 
-    this._sfx('hurt');
     // Knockback away from the enemy.
     const dir = player.x < enemy.x ? -1 : 1;
     player.setVelocity(220 * dir, -260);
 
-    if (this.score > 0) {
-      this.score -= 1;
-      this._updateScoreText();
+    if (this.balloons.length > 0) {
+      this._popOneBalloon();
       this._flashDamage();
+      if (this.balloons.length === 0) {
+        // Last balloon just popped — end the game on the next tick so the
+        // pop animation has a moment to play.
+        this.time.delayedCall(250, () => {
+          this._endGame(this._isTouch
+            ? 'Eyvah! Tüm balonlar patladı!'
+            : 'Eyvah! Tüm balonlar patladı!\nR ile yeniden başla');
+        });
+      }
     } else {
-      // No apples left to lose -> game over.
       this._endGame(this._isTouch ? 'Eyvah!' : 'Eyvah!\nR ile yeniden başla');
     }
   }
@@ -839,6 +931,26 @@ export class GameScene extends Phaser.Scene {
         [523, 659, 784, 1046].forEach((f, i) =>
           setTimeout(() => tone(f, 0.18, 'square', 0.20), i * 110));
         break;
+      case 'pop': {
+        // Short pitch-down 'pop' (sounds like a balloon bursting).
+        tone(900, 0.05, 'square', 0.22, 220);
+        // Brief noise burst layered on top.
+        try {
+          const buf = ctx.createBuffer(1, ctx.sampleRate * 0.08, ctx.sampleRate);
+          const data = buf.getChannelData(0);
+          for (let i = 0; i < data.length; i++) {
+            data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+          }
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          const ng = ctx.createGain();
+          ng.gain.setValueAtTime(0.18, now);
+          ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+          src.connect(ng).connect(ctx.destination);
+          src.start(now);
+        } catch { /* noise buffer optional */ }
+        break;
+      }
       default: break;
     }
   }
@@ -853,7 +965,9 @@ export class GameScene extends Phaser.Scene {
     // Fallback drawn face (used only if assets/face.png is missing).
     this._buildPlayerFaceTexture();
 
-    // Three balloons (red / yellow / blue).
+    // Three balloons (red / yellow / blue) -- legacy textures kept for code
+    // that may still reference them; runtime balloons are generated on the
+    // fly with random colors in _initBalloons().
     this._buildBalloonTexture(g, 'balloon-red',    0xe53935, 0xff7a6b, 0xb71c1c);
     this._buildBalloonTexture(g, 'balloon-yellow', 0xfbc02d, 0xfff59d, 0xf57f17);
     this._buildBalloonTexture(g, 'balloon-blue',   0x1e88e5, 0x90caf9, 0x0d47a1);
