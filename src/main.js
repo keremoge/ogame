@@ -1,3 +1,4 @@
+import { CharacterSelectScene } from './scenes/CharacterSelectScene.js';
 import { GameScene } from './scenes/GameScene.js';
 
 const config = {
@@ -10,6 +11,9 @@ const config = {
     height: '100%',
   },
   backgroundColor: '#5c94fc',
+  dom: {
+    createContainer: true,
+  },
   physics: {
     default: 'arcade',
     arcade: {
@@ -17,7 +21,7 @@ const config = {
       debug: false,
     },
   },
-  scene: [GameScene],
+  scene: [CharacterSelectScene, GameScene],
 };
 
 // eslint-disable-next-line no-new

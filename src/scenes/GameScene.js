@@ -26,12 +26,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    // Try to load the real photo for the head. If it's missing the load
-    // simply errors silently and we draw a fallback face.
-    this.load.image('face', 'assets/face.png');
-    this.load.on('loaderror', (file) => {
-      if (file.key === 'face') this._faceMissing = true;
-    });
+    // The face texture ('face') is provided by CharacterSelectScene before
+    // it starts this scene — either the bundled Kaan photo or a user
+    // upload that's already been cropped/normalized to a square.
+    // If for any reason it isn't there (deep-link / hot reload), fall back.
+    if (!this.textures.exists('face')) {
+      this.load.image('face', 'assets/face.png');
+      this.load.on('loaderror', (file) => {
+        if (file.key === 'face') this._faceMissing = true;
+      });
+    }
   }
 
   create() {
@@ -198,6 +202,10 @@ export class GameScene extends Phaser.Scene {
     this.player.body.setSize(40, 72).setOffset(28, 8);
     this.player.body.setMaxVelocity(260, 1100);
     this.player.setScale(this.PLAYER_SCALE);
+    // Render player + limbs above ground tiles (which sit at default depth 0).
+    // Back limbs subtract 1 from this baseline, so we need >= 2 to keep them
+    // visible in front of the grass/dirt strip at the player's feet.
+    this.player.setDepth(4);
 
     // Hand anchor offset (relative to player center, in DISPLAY pixels) —
     // used for balloon strings. The drawn hands sit at canvas (cx ± 28, 40),
@@ -210,16 +218,43 @@ export class GameScene extends Phaser.Scene {
     // the face, so we size by WIDTH (not height) and center the image on
     // the body so the face lands on the neck/shoulders regardless of crop.
     const headKey = (this.textures.exists('face') && !this._faceMissing) ? 'face' : 'playerFace';
-    this.HEAD_TARGET_W = 60; // pixel width of the head image on screen (was 80)
+    this.HEAD_TARGET_W = 78; // pixel width of the head image on screen
     this.playerHead = this.add.image(this.player.x, this.player.y, headKey)
       .setDepth(this.player.depth + 1);
     this.playerHead.setOrigin(0.5, 0.5);
-    if (headKey === 'face') {
-      const tex = this.textures.get('face').getSourceImage();
-      this.playerHead.setScale(this.HEAD_TARGET_W / tex.width);
-    } else {
-      this.playerHead.setScale(this.HEAD_TARGET_W / 96);
+    // Robust sizing: pin display WIDTH to HEAD_TARGET_W and HEIGHT proportional
+    // to the source aspect ratio. Works the same whether the source is the
+    // bundled Kaan PNG, a generated face texture, or a base64 data URL added
+    // by the character picker.
+    {
+      const src = this.textures.get(headKey).getSourceImage();
+      const sw = (src && src.width)  ? src.width  : 96;
+      const sh = (src && src.height) ? src.height : 96;
+      const aspect = sh / sw;
+      this.playerHead.setDisplaySize(this.HEAD_TARGET_W, this.HEAD_TARGET_W * aspect);
     }
+
+    // --- Animated limbs (arms + legs). Each is a separate sprite that
+    // pivots from its top-center (= shoulder / hip) and is positioned + rotated
+    // every frame in _animateLimbs(). The static body texture deliberately
+    // leaves these out so the limbs don't overlap a "rest pose" silhouette.
+    const mkLimb = (key, depthOffset) => this.add.image(0, 0, key)
+      .setOrigin(0.5, 0.05)
+      .setScale(this.PLAYER_SCALE)
+      .setDepth(this.player.depth + depthOffset);
+    // Back limbs render BEHIND the body, front limbs in front of it. This
+    // gives a tiny bit of perspective when arms swing past the torso.
+    this.limbBackLeg  = mkLimb('limb_leg', -1);
+    this.limbBackArm  = mkLimb('limb_arm', -1);
+    this.limbFrontLeg = mkLimb('limb_leg',  0);
+    this.limbFrontArm = mkLimb('limb_arm',  0);
+    // Body shoulder / hip anchors in source-pixel coords (origin = 48,48).
+    // Shoulder slightly inside the torso so the arm appears to grow from
+    // under the shoulder cap.
+    this.SHOULDER_DX = 22;   // ±22 src px from cx (hip is narrower)
+    this.SHOULDER_DY = -32;  // 32 src px above center
+    this.HIP_DX      = 14;
+    this.HIP_DY      = 6;
 
     // --- Helium balloons on long strings. The player starts with 10 of them;
     // each enemy hit pops one. The set of colors and per-balloon size is
@@ -231,8 +266,8 @@ export class GameScene extends Phaser.Scene {
     // --- Graduation outfit (gown over body, cap on head). Hidden until the
     // player walks past the NASA launchpad — see _syncOutfit().
     this.gownImg = this.add.image(this.player.x, this.player.y, 'gown')
-      .setOrigin(0.5, 0.5).setDepth(this.player.depth + 1).setVisible(false)
-      .setScale(this.PLAYER_SCALE);
+      .setOrigin(0.5, 0.5).setDepth(this.player.depth + 2).setVisible(false)
+      .setScale(this.PLAYER_SCALE * 1.08);
     this.capImg = this.add.image(this.player.x, this.player.y, 'cap')
       .setOrigin(0.5, 1).setDepth(this.playerHead.depth + 1).setVisible(false)
       .setScale(this.PLAYER_SCALE);
@@ -355,6 +390,7 @@ export class GameScene extends Phaser.Scene {
 
     // Always update visuals.
     this._animateWalk(time);
+    this._animateLimbs(time, dt);
     this._syncHead();
     this._syncOutfit();
     this._updateBalloons(dt);
@@ -382,6 +418,147 @@ export class GameScene extends Phaser.Scene {
     this.player.setOrigin(0.5, 0.5);
     this.player.angle = this._walkTilt;
     this.player.setDisplayOrigin(48, 48 + this._walkBob);
+  }
+
+  // -----------------------------------------------------------------------
+  // Animated arms + legs.
+  //
+  // Per-state targets (degrees, 0 = pointing straight DOWN from anchor):
+  //   running on ground : alternating swing ±35° (arms), ±28° (legs),
+  //                       amplitude scales with ground speed.
+  //   jumping (vy<-100) : arms thrown up (~ -150° / +150°),
+  //                       legs tucked back (~ +20° / -20°).
+  //   falling (vy>120)  : arms out for balance (±55°),
+  //                       legs spread slightly (±15°).
+  //   landing impact    : arms forward (~70° / -70°), legs squashed (±5°)
+  //                       — driven by `_landImpactT` which decays in 0.25s.
+  //   idle              : tiny breathing sway (~±3°).
+  //
+  // Each frame we tween the rendered angle toward the target so movement
+  // looks smooth instead of snappy.
+  // -----------------------------------------------------------------------
+  _animateLimbs(time, dt) {
+    if (!this.limbFrontArm) return;
+
+    // Hide all limbs once the player puts on the graduation gown — the
+    // gown silhouette covers them entirely so they'd just clip through.
+    // BUT: keep the hand anchor (used by balloon strings) tracking the
+    // player so the strings don't freeze in mid-air at the moment of
+    // graduation. We approximate the hand position from the gown sleeve.
+    if (this._graduated) {
+      this.limbFrontArm.setVisible(false);
+      this.limbBackArm.setVisible(false);
+      this.limbFrontLeg.setVisible(false);
+      this.limbBackLeg.setVisible(false);
+      const sgn = this.player.flipX ? -1 : 1;
+      // Sleeve cuff sits roughly at sweater waist level on either side.
+      this.HAND_LIVE_X = this.player.x + sgn * -this.SHOULDER_DX * this.PLAYER_SCALE;
+      this.HAND_LIVE_Y = this.player.y + 14 * this.PLAYER_SCALE;
+      return;
+    }
+    [this.limbFrontArm, this.limbBackArm, this.limbFrontLeg, this.limbBackLeg]
+      .forEach((s) => s.setVisible(this.player.visible));
+
+    // Track landing impact (set by _updatePlayer when we hit the ground hard).
+    if (this._landingImpulse > 50 && (this._landImpactT || 0) <= 0) {
+      this._landImpactT = 1; // 1 → 0 over ~250 ms below
+    }
+    this._landImpactT = Math.max(0, (this._landImpactT || 0) - dt * 4);
+
+    const onGround = this.player.body.blocked.down || this.player.body.touching.down;
+    const vx = this.player.body.velocity.x;
+    const vy = this.player.body.velocity.y;
+    const speed = Math.abs(vx);
+    const moving = speed > 30;
+    const facingLeft = this.player.flipX;
+
+    // Walk phase synced to bob/tilt so feet & body move together.
+    const phase = time * 0.018;
+    const swing = Math.sin(phase);
+    const runAmp = Phaser.Math.Clamp(speed / 180, 0, 1);
+
+    // Decide target angles for the FRONT (= forward-facing) arm/leg vs
+    // the BACK (= rear) arm/leg. "Front" means the limb on the side
+    // the player is moving toward; "back" trails behind.
+    let armFront = 0, armBack = 0, legFront = 0, legBack = 0;
+
+    if (this._landImpactT > 0) {
+      // Landing pose: arms thrust forward, legs splayed slightly to absorb.
+      const t = this._landImpactT;
+      armFront = -55 * t; armBack = 55 * t;
+      legFront = -8 * t;  legBack = 8 * t;
+    } else if (!onGround) {
+      if (vy < -80) {
+        // Jumping up: arms reach overhead, legs tuck back.
+        const t = Phaser.Math.Clamp(-vy / 500, 0, 1);
+        armFront = -140 * t; armBack = -150 * t;
+        legFront = 18 * t;   legBack = -18 * t;
+      } else {
+        // Falling: arms out for balance, legs prepare for landing.
+        const t = Phaser.Math.Clamp(vy / 500, 0, 1);
+        armFront = -50 * t; armBack = 50 * t;
+        legFront = -12 * t; legBack = 12 * t;
+      }
+    } else if (moving) {
+      // Running: alternating swing. Arm and OPPOSITE leg move together
+      // (counter-rotation) for a natural gait.
+      armFront =  swing * 38 * runAmp;
+      armBack  = -swing * 38 * runAmp;
+      legFront = -swing * 30 * runAmp;
+      legBack  =  swing * 30 * runAmp;
+    } else {
+      // Idle: tiny breathing wobble.
+      const breathe = Math.sin(time * 0.003) * 2.5;
+      armFront =  breathe; armBack = -breathe;
+      legFront = 0; legBack = 0;
+    }
+
+    // Smooth toward targets so transitions don't pop.
+    const lerp = Phaser.Math.Linear;
+    const k = Math.min(1, dt * 12); // higher = snappier
+    this._aFA = lerp(this._aFA || 0, armFront, k);
+    this._aBA = lerp(this._aBA || 0, armBack,  k);
+    this._aFL = lerp(this._aFL || 0, legFront, k);
+    this._aBL = lerp(this._aBL || 0, legBack,  k);
+
+    const scale = this.PLAYER_SCALE;
+    const bob = (this._walkBob || 0) * scale;
+    const tilt = this._walkTilt || 0;
+    // Anchor positions in display pixels (relative to player.x/y).
+    // facingLeft flips the X side that counts as "front".
+    const sgnFront = facingLeft ? -1 : 1;
+    const shoulderFY = this.player.y + this.SHOULDER_DY * scale - bob;
+    const shoulderBY = shoulderFY;
+    const hipFY = this.player.y + this.HIP_DY * scale - bob;
+    const hipBY = hipFY;
+    const shoulderFX = this.player.x + sgnFront *  this.SHOULDER_DX * scale;
+    const shoulderBX = this.player.x + sgnFront * -this.SHOULDER_DX * scale;
+    const hipFX = this.player.x + sgnFront *  this.HIP_DX * scale;
+    const hipBX = this.player.x + sgnFront * -this.HIP_DX * scale;
+
+    // Apply pose. Tilt is added so limbs sway with body lean.
+    this.limbFrontArm.setPosition(shoulderFX, shoulderFY).setAngle(this._aFA + tilt);
+    this.limbBackArm .setPosition(shoulderBX, shoulderBY).setAngle(this._aBA + tilt);
+    this.limbFrontLeg.setPosition(hipFX,      hipFY)     .setAngle(this._aFL + tilt);
+    this.limbBackLeg .setPosition(hipBX,      hipBY)     .setAngle(this._aBL + tilt);
+    // Match flip so the cuff trim points the right way.
+    [this.limbFrontArm, this.limbBackArm, this.limbFrontLeg, this.limbBackLeg]
+      .forEach((s) => s.setFlipX(facingLeft));
+    // Subtle game-over tint.
+    const tint = this.gameOver ? 0xbbbbbb : 0xffffff;
+    [this.limbFrontArm, this.limbBackArm, this.limbFrontLeg, this.limbBackLeg]
+      .forEach((s) => s.setTint(tint));
+
+    // Update the hand anchor used for balloons so strings come from the
+    // moving hand (BACK arm — the one trailing behind the player).
+    // Geometry: limb_arm canvas is 16x40 with the hand circle drawn at
+    // (8, 34). Origin is (0.5, 0.05), so the pivot in source pixels is
+    // (8, 2). The hand is therefore 32 source-pixels below the pivot,
+    // which becomes 32*PLAYER_SCALE in display pixels.
+    const handLen = 32 * scale;
+    const ang = (this._aBA + tilt) * Math.PI / 180;
+    this.HAND_LIVE_X = shoulderBX + Math.sin(ang) * handLen;
+    this.HAND_LIVE_Y = shoulderBY + Math.cos(ang) * handLen;
   }
 
   // ---- Game feel helpers -------------------------------------------------
@@ -602,8 +779,13 @@ export class GameScene extends Phaser.Scene {
       // Little celebration pop.
       const targetScale = this.PLAYER_SCALE;
       this.tweens.add({
-        targets: [this.gownImg, this.capImg],
+        targets: this.capImg,
         scale: { from: targetScale * 0.6, to: targetScale },
+        duration: 280, ease: 'Back.Out',
+      });
+      this.tweens.add({
+        targets: this.gownImg,
+        scale: { from: targetScale * 0.6, to: targetScale * 1.08 },
         duration: 280, ease: 'Back.Out',
       });
       this._sfx && this._sfx('win');
@@ -880,18 +1062,30 @@ export class GameScene extends Phaser.Scene {
     const landingKick = this._landingImpulse || 0;
     this._landingImpulse = 0;
 
-    // Hand anchor: at the actual drawn HAND position on the body texture.
-    // We anchor the balloons to the HAND BEHIND the direction of motion
-    // (so when the player walks right, the strings come from the left/back
-    // hand, and vice versa). This matches how a kid running with balloons
-    // would naturally trail them behind.
+    // Hand anchor: prefer the LIVE position of the back hand (set by
+    // _animateLimbs), so balloons swing naturally with the trailing arm.
+    // Fall back to the static offset for the first frame before limbs run.
     const dirX = this.player.flipX ? 1 : -1;
-    const handBaseX = this.player.x + dirX * this.HAND_DX;
-    const handBaseY = this.player.y + this.HAND_DY;
+    const handBaseX = (this.HAND_LIVE_X != null)
+      ? this.HAND_LIVE_X : this.player.x + dirX * this.HAND_DX;
+    const handBaseY = (this.HAND_LIVE_Y != null)
+      ? this.HAND_LIVE_Y : this.player.y + this.HAND_DY;
 
     this.balloons.forEach((b, idx) => {
       const anchorX = handBaseX + b.handDX * dirX;
       const anchorY = handBaseY;
+
+      // Safety net: if a balloon's state somehow went bad (NaN from a
+      // weird collision, or it drifted absurdly far away because the
+      // anchor moved by a big jump), snap it back near the anchor so
+      // it can never appear "stuck" hanging in mid-air.
+      if (!Number.isFinite(b.pos.x) || !Number.isFinite(b.pos.y) ||
+          Math.hypot(b.pos.x - anchorX, b.pos.y - anchorY) > b.length * 4) {
+        b.pos.x = anchorX + Phaser.Math.FloatBetween(-20, 20);
+        b.pos.y = anchorY - b.length * 0.85;
+        b.vel.x = 0;
+        b.vel.y = 0;
+      }
 
       const dx = b.pos.x - anchorX;
       const dy = b.pos.y - anchorY;
@@ -1479,6 +1673,8 @@ export class GameScene extends Phaser.Scene {
 
     // Player body (no head — head is a separate image overlay).
     this._buildPlayerBodyTexture();
+    // Animated arm + leg textures (separate sprites driven by _animateLimbs).
+    this._buildLimbTextures();
     // Fallback drawn face (used only if assets/face.png is missing).
     this._buildPlayerFaceTexture();
 
@@ -1784,50 +1980,56 @@ export class GameScene extends Phaser.Scene {
 
   _buildGraduationTextures() {
     // ----- Gown (96x96, transparent) -----
+    // Designed as a FULL-COVERAGE silhouette: the gown completely hides the
+    // body's sweater, arms and torso behind it (it just leaves the head and
+    // the legs/feet poking out). Numbers chosen to envelop the body sprite,
+    // which is rendered at 0.75x with body content from x≈8..88, y≈8..80.
     const gown = this.textures.createCanvas('gown', 96, 96);
     const gx = gown.getContext();
-    // Robe body — black with subtle highlight, V-neck open at top
     gx.fillStyle = '#1b1b1b';
-    // Left half
+    // Big bell-shaped robe, drawn as a single closed path so there are no
+    // gaps between the sleeves and the torso.
     gx.beginPath();
-    gx.moveTo(48, 22);   // neck top
-    gx.lineTo(20, 32);   // left shoulder
-    gx.lineTo(8,  60);   // sleeve cuff out
-    gx.lineTo(18, 64);   // sleeve cuff in
-    gx.lineTo(28, 50);   // armpit
-    gx.lineTo(28, 88);   // hem left
-    gx.lineTo(48, 90);   // hem center
-    gx.closePath(); gx.fill();
-    // Right half (mirror)
-    gx.beginPath();
-    gx.moveTo(48, 22);
-    gx.lineTo(76, 32);
-    gx.lineTo(88, 60);
-    gx.lineTo(78, 64);
-    gx.lineTo(68, 50);
-    gx.lineTo(68, 88);
-    gx.lineTo(48, 90);
-    gx.closePath(); gx.fill();
+    gx.moveTo(48, 18);   // neck top (just under the chin)
+    gx.lineTo(36, 22);   // left collar
+    gx.lineTo(14, 30);   // left shoulder
+    gx.lineTo(2,  60);   // left sleeve cuff (outer)
+    gx.lineTo(2,  72);   // left sleeve cuff bottom
+    gx.lineTo(20, 70);   // sleeve cuff (inner)
+    gx.lineTo(22, 96);   // hem far-left (extends past the bottom of the body)
+    gx.lineTo(74, 96);   // hem far-right
+    gx.lineTo(76, 70);   // right sleeve cuff (inner)
+    gx.lineTo(94, 72);   // right sleeve cuff bottom
+    gx.lineTo(94, 60);   // right sleeve cuff (outer)
+    gx.lineTo(82, 30);   // right shoulder
+    gx.lineTo(60, 22);   // right collar
+    gx.closePath();
+    gx.fill();
+
     // Subtle vertical seam shading
     gx.strokeStyle = 'rgba(255,255,255,0.08)';
     gx.lineWidth = 1;
-    gx.beginPath(); gx.moveTo(48, 26); gx.lineTo(48, 90); gx.stroke();
-    // Sleeve cuff trim
+    gx.beginPath(); gx.moveTo(48, 26); gx.lineTo(48, 92); gx.stroke();
+    // Sleeve cuff trim (yellow piping at each cuff opening)
     gx.strokeStyle = '#ffd54f'; gx.lineWidth = 2;
-    gx.beginPath(); gx.moveTo(8, 60);  gx.lineTo(18, 64); gx.stroke();
-    gx.beginPath(); gx.moveTo(88, 60); gx.lineTo(78, 64); gx.stroke();
-    // Hood / stole — red strip down each side of the V-neck
+    gx.beginPath(); gx.moveTo(2, 72);  gx.lineTo(20, 70); gx.stroke();
+    gx.beginPath(); gx.moveTo(94, 72); gx.lineTo(76, 70); gx.stroke();
+    // Hem trim
+    gx.strokeStyle = 'rgba(255,213,79,0.85)'; gx.lineWidth = 2;
+    gx.beginPath(); gx.moveTo(22, 95); gx.lineTo(74, 95); gx.stroke();
+
+    // Hood / stole — red strip down each side of the V-neck (over the gown)
     gx.fillStyle = '#c62828';
     gx.beginPath();
-    gx.moveTo(40, 24); gx.lineTo(46, 22); gx.lineTo(46, 70); gx.lineTo(38, 70);
+    gx.moveTo(40, 22); gx.lineTo(46, 20); gx.lineTo(46, 76); gx.lineTo(38, 76);
     gx.closePath(); gx.fill();
     gx.beginPath();
-    gx.moveTo(56, 24); gx.lineTo(50, 22); gx.lineTo(50, 70); gx.lineTo(58, 70);
+    gx.moveTo(56, 22); gx.lineTo(50, 20); gx.lineTo(50, 76); gx.lineTo(58, 76);
     gx.closePath(); gx.fill();
     // Hood trim (yellow)
     gx.strokeStyle = '#ffd54f'; gx.lineWidth = 1.5;
-    gx.beginPath(); gx.moveTo(38, 70); gx.lineTo(46, 70); gx.stroke();
-    gx.beginPath(); gx.moveTo(50, 70); gx.lineTo(58, 70); gx.stroke();
+    gx.beginPath(); gx.moveTo(38, 76); gx.lineTo(46, 76); gx.stroke();
+    gx.beginPath(); gx.moveTo(50, 76); gx.lineTo(58, 76); gx.stroke();
     gown.refresh();
 
     // ----- Cap (mortarboard) 96x48, transparent -----
@@ -1960,49 +2162,90 @@ export class GameScene extends Phaser.Scene {
     ctx.clearRect(0, 0, W, H);
     const cx = W / 2;
 
+    // NOTE: arms (sleeves + hands) and legs (pants legs + crocs) are NOT
+    // drawn here — they are separate animated sprites attached at the
+    // shoulders / hips. See _buildLimbTextures() and _animateLimbs().
+
     // Neck
     ctx.fillStyle = '#d8a37c';
     ctx.fillRect(cx - 8, 0, 16, 10);
 
-    // Sweater
+    // Sweater torso (no sleeves).
     ctx.fillStyle = '#f6f1e3';
     this._roundRect(ctx, cx - 24, 8, 48, 40, 9); ctx.fill();
+    // Shoulder caps (small rounded stubs at the top of the torso so the
+    // attached arms don't look like they fly out of nowhere).
+    ctx.fillStyle = '#f6f1e3';
+    this._roundRect(ctx, cx - 30, 12, 12, 14, 5); ctx.fill();
+    this._roundRect(ctx, cx + 18, 12, 12, 14, 5); ctx.fill();
+    // Belt shadow.
     ctx.fillStyle = 'rgba(0,0,0,0.10)';
     ctx.fillRect(cx - 24, 42, 48, 6);
-    // Sleeves
-    ctx.fillStyle = '#f6f1e3';
-    this._roundRect(ctx, cx - 34, 12, 12, 28, 5); ctx.fill();
-    this._roundRect(ctx, cx + 22, 12, 12, 28, 5); ctx.fill();
-    // Hands
-    ctx.fillStyle = '#f4c8a0';
-    ctx.beginPath(); ctx.arc(cx - 28, 40, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(cx + 28, 40, 5, 0, Math.PI * 2); ctx.fill();
 
-    // Pants (brown)
+    // Pants waist only — the legs themselves are separate sprites.
     const pantsY = 48;
     ctx.fillStyle = '#9a6536';
-    ctx.fillRect(cx - 24, pantsY, 48, 24);
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    ctx.fillRect(cx - 1, pantsY, 2, 24);
+    ctx.fillRect(cx - 24, pantsY, 48, 10);
     ctx.fillStyle = '#7d4f25';
-    ctx.fillRect(cx - 24, pantsY + 20, 22, 4);
-    ctx.fillRect(cx + 2, pantsY + 20, 22, 4);
-
-    // Crocs (blue)
-    const shoeY = pantsY + 24;
-    ctx.fillStyle = '#1f5fae';
-    ctx.beginPath(); ctx.ellipse(cx - 14, shoeY + 4, 12, 5, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx + 14, shoeY + 4, 12, 5, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#163f78';
-    ctx.fillRect(cx - 26, shoeY + 5, 24, 2);
-    ctx.fillRect(cx + 2, shoeY + 5, 24, 2);
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    for (let i = -3; i <= 3; i += 2) {
-      ctx.beginPath(); ctx.arc(cx - 14 + i * 2, shoeY + 2, 0.7, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(cx + 14 + i * 2, shoeY + 2, 0.7, 0, Math.PI * 2); ctx.fill();
-    }
+    ctx.fillRect(cx - 24, pantsY + 8, 48, 2);
 
     tex.refresh();
+  }
+
+  // ----- Limb textures (animated arm + leg sprites) ----------------------
+
+  _buildLimbTextures() {
+    // ARM texture: 16 x 40, origin at top-center (=shoulder pivot).
+    //   y 0..22 : cream sleeve (rounded cuff at the bottom)
+    //   y 22..28: skin forearm (oval)
+    //   y 28..40: skin hand (rounded blob)
+    {
+      const aw = 16, ah = 40;
+      const tex = this.textures.createCanvas('limb_arm', aw, ah);
+      const ctx = tex.getContext();
+      ctx.clearRect(0, 0, aw, ah);
+      // Sleeve
+      ctx.fillStyle = '#f6f1e3';
+      this._roundRect(ctx, 2, 0, 12, 24, 5); ctx.fill();
+      // Cuff trim
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(2, 22, 12, 2);
+      // Forearm + hand
+      ctx.fillStyle = '#f4c8a0';
+      this._roundRect(ctx, 4, 22, 8, 12, 4); ctx.fill();
+      ctx.beginPath(); ctx.arc(aw / 2, 34, 5.5, 0, Math.PI * 2); ctx.fill();
+      // Subtle thumb shadow.
+      ctx.strokeStyle = 'rgba(120,75,45,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(aw / 2, 34, 4.5, 1.6, 2.4); ctx.stroke();
+      tex.refresh();
+    }
+    // LEG texture: 16 x 44, origin at top-center (=hip pivot).
+    //   y 0..28 : brown pants leg (rounded)
+    //   y 28..44: blue croc shoe (oval) with white speckles
+    {
+      const lw = 16, lh = 44;
+      const tex = this.textures.createCanvas('limb_leg', lw, lh);
+      const ctx = tex.getContext();
+      ctx.clearRect(0, 0, lw, lh);
+      // Pants leg
+      ctx.fillStyle = '#9a6536';
+      this._roundRect(ctx, 2, 0, 12, 30, 4); ctx.fill();
+      // Hem trim
+      ctx.fillStyle = '#7d4f25';
+      ctx.fillRect(2, 28, 12, 2);
+      // Croc shoe
+      ctx.fillStyle = '#1f5fae';
+      ctx.beginPath(); ctx.ellipse(lw / 2, 36, 9, 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#163f78';
+      ctx.fillRect(1, 38, 14, 2);
+      // White speckles on the croc.
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      for (let i = -2; i <= 2; i += 1) {
+        ctx.beginPath(); ctx.arc(lw / 2 + i * 2, 34.5, 0.7, 0, Math.PI * 2); ctx.fill();
+      }
+      tex.refresh();
+    }
   }
 
   // ----- Fallback drawn face (used only if assets/face.png missing) ------
