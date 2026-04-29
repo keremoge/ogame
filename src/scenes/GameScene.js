@@ -722,8 +722,23 @@ export class GameScene extends Phaser.Scene {
     if (!this.touchBtnLeft) return;
     if (this.tapZone) this.tapZone.setSize(viewW, viewH);
 
-    const r = Math.max(56, Math.min(96, Math.round(viewH * 0.10)));
+    // Size the buttons against the SHORT side of the viewport so they shrink
+    // on small/portrait phones. Also cap by horizontal space so left+right+jump
+    // never overlap (need 6r + gaps + margins to fit across viewW).
+    const short = Math.min(viewW, viewH);
+    let r = Math.round(short * 0.09);
+    r = Math.max(28, Math.min(72, r));
+    const gap = Math.round(r * 0.5);
     const margin = Math.round(r * 0.6);
+    // If left+right pair plus jump button can't fit horizontally, shrink r.
+    const needed = margin * 2 + r * 6 + gap * 2; // two left btns + jump
+    if (needed > viewW) {
+      const scale = viewW / needed;
+      r = Math.max(22, Math.round(r * scale));
+    }
+    const m = Math.round(r * 0.6);
+    const g = Math.round(r * 0.5);
+
     const drawBtn = (btn, cx, cy) => {
       btn.setPosition(cx, cy);
       btn._bg.clear();
@@ -736,9 +751,9 @@ export class GameScene extends Phaser.Scene {
     };
 
     // Left + right at bottom-left, jump at bottom-right.
-    drawBtn(this.touchBtnLeft,  margin + r,           viewH - margin - r);
-    drawBtn(this.touchBtnRight, margin + r * 3 + 20,  viewH - margin - r);
-    drawBtn(this.touchBtnJump,  viewW - margin - r,   viewH - margin - r);
+    drawBtn(this.touchBtnLeft,  m + r,             viewH - m - r);
+    drawBtn(this.touchBtnRight, m + r * 3 + g,     viewH - m - r);
+    drawBtn(this.touchBtnJump,  viewW - m - r,     viewH - m - r);
   }
 
   // ---- HUD card ----------------------------------------------------------
