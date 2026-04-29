@@ -54,6 +54,7 @@ export class GameScene extends Phaser.Scene {
 
     this._createSky(viewW, viewH);
     this._createClouds(worldWidth, viewH);
+    this._createMountains(worldWidth, groundY);
     this._createHills(worldWidth, groundY);
     this._createCityWall(worldWidth, groundY);
     this._createSchool(worldWidth, groundY);
@@ -62,6 +63,7 @@ export class GameScene extends Phaser.Scene {
     this._createNasa(worldWidth, groundY);
     this._createSakaryaBridge(worldWidth, groundY);
     this._createTrees(worldWidth, groundY);
+    this._createAmbientDust(viewW, viewH);
 
     // --- Ground.
     this.platforms = this.physics.add.staticGroup();
@@ -81,39 +83,30 @@ export class GameScene extends Phaser.Scene {
       [3880, groundY - 210, 3],
     ];
 
-    // ---- Sky towers between graduation and the finish line ----
-    // Stacked zig-zag bench platforms so the player can climb really high
-    // in the NASA / post-graduation stretch. The player's jump apex is
-    // ~245 px (JUMP_VELOCITY -700, gravity 1000), so the FIRST tier must
-    // sit well within that height from the ground, and tier-to-tier gaps
-    // must also stay below 240 px. We use 180 px for the first tier and
-    // 120 px gaps for the rest. Towers are spread EVENLY between
-    // graduation and the finish line so there's never a long empty
-    // stretch at the end of the level.
+    // ---- Sky outposts between graduation and the finish line ----
+    // Short two-step zig-zag platforms (NOT towers) so the post-graduation
+    // stretch still has things to jump on without becoming a vertical
+    // climbing grind. The player's jump apex is ~245 px (JUMP_VELOCITY
+    // -700, gravity 1000), so the first tier sits at 180 px and the
+    // second tier 130 px above that — both comfortably reachable.
     const gradX = (this._graduateAtX != null) ? this._graduateAtX : worldWidth * 0.55;
     const finishX = worldWidth - 100;
     const span = finishX - gradX;
     if (span > 400) {
-      // Pick a count that keeps each tower comfortably ~500-650 px apart.
-      const towerCount = Math.max(4, Math.min(7, Math.round(span / 560)));
-      const margin = 220; // keep clear of the graduation point and the flag
+      // Aim for ~2-3 outposts spaced ~700-900 px apart.
+      const towerCount = Math.max(2, Math.min(3, Math.round(span / 800)));
+      const margin = 260; // keep clear of the graduation point and the flag
       const usable = span - margin * 2;
-      const step = usable / Math.max(1, towerCount - 1);
+      const step = towerCount > 1 ? usable / (towerCount - 1) : 0;
       for (let i = 0; i < towerCount; i++) {
         const baseX = Math.round(gradX + margin + i * step);
-        // Alternate the zig-zag direction per tower for variety.
         const dir = (i % 2 === 0) ? 1 : -1;
         const xLeft = baseX;
-        const xRight = baseX + 100 * dir;
-        // 5 stacked tiers + a wider top platform. First tier is reachable
-        // from the ground (jump apex ~245 px), each next tier 120 px up.
+        const xRight = baseX + 110 * dir;
+        // Just two tiers + a slightly wider top platform.
         benches.push(
-          [xLeft,  groundY - 180, 2],
-          [xRight, groundY - 300, 2],
-          [xLeft,  groundY - 420, 2],
-          [xRight, groundY - 540, 2],
-          [xLeft,  groundY - 660, 2],
-          [Math.round(baseX + 20 * dir), groundY - 780, 3],
+          [xLeft,  groundY - 180, 3],
+          [xRight, groundY - 310, 3],
         );
       }
     }
@@ -147,17 +140,16 @@ export class GameScene extends Phaser.Scene {
     });
 
     // High-altitude vitamins — placed UP IN THE SKY so the player has to
-    // time jumps to catch them. They bob with a larger amplitude.
+    // time jumps to catch them. They bob with a larger amplitude. Heights
+    // capped at ~340 px so they're always reachable from the ground or a
+    // single bench (jump apex ~245 px).
     const skyApples = [
       // Reachable with a normal jump from the ground (~240px max).
       [380,  groundY - 200], [1140, groundY - 210], [1900, groundY - 220],
       [2620, groundY - 200], [3240, groundY - 215], [3780, groundY - 205],
       // Higher ones — reachable by jumping off a nearby bench.
-      [820,  groundY - 320], [1580, groundY - 340], [2200, groundY - 360],
-      [2940, groundY - 330], [3500, groundY - 350],
-      // Even higher, requiring chained bench jumps.
-      [600,  groundY - 430], [1340, groundY - 460], [2400, groundY - 480],
-      [3100, groundY - 450], [3680, groundY - 470],
+      [820,  groundY - 320], [1580, groundY - 330], [2200, groundY - 320],
+      [2940, groundY - 330], [3500, groundY - 320],
     ];
     skyApples.forEach(([ax, ay]) => {
       const apple = this.apples.create(ax, ay, randFruit());
@@ -198,26 +190,27 @@ export class GameScene extends Phaser.Scene {
     // --- Player. Body texture is 96x96 with the visible body running from
     // canvas y=8 (top of sweater) to y=80 (bottom of crocs). The physics body
     // is sized so its bottom edge sits exactly at the bottom of the crocs —
-    // no gap between feet and ground.
+    // no gap between feet and ground. Player is rendered at 0.75x for a
+    // less-overwhelming silhouette.
+    this.PLAYER_SCALE = 0.75;
     this.player = this.physics.add.sprite(80, groundY - 200, 'playerBody');
     this.player.setCollideWorldBounds(true);
     this.player.body.setSize(40, 72).setOffset(28, 8);
     this.player.body.setMaxVelocity(260, 1100);
-    // Bigger render scale so the body reads well next to the head.
-    this.player.setScale(1);
+    this.player.setScale(this.PLAYER_SCALE);
 
-    // Hand anchor offset (relative to player center) — used for balloon strings.
-    // The drawn hands sit at canvas (cx ± 28, 40), and origin is (48,48),
-    // so the right hand is at (player.x + 28, player.y - 8).
-    this.HAND_DX = 28;
-    this.HAND_DY = -8;
+    // Hand anchor offset (relative to player center, in DISPLAY pixels) —
+    // used for balloon strings. The drawn hands sit at canvas (cx ± 28, 40),
+    // origin (48,48); after scale, that's ±28*scale, (40-48)*scale.
+    this.HAND_DX = 28 * this.PLAYER_SCALE;
+    this.HAND_DY = -8 * this.PLAYER_SCALE;
 
     // --- Player head: real photo if present, else drawn face. The head is
     // sized to read big next to the body. Photos often have padding around
     // the face, so we size by WIDTH (not height) and center the image on
     // the body so the face lands on the neck/shoulders regardless of crop.
     const headKey = (this.textures.exists('face') && !this._faceMissing) ? 'face' : 'playerFace';
-    this.HEAD_TARGET_W = 80; // pixel width of the head image on screen
+    this.HEAD_TARGET_W = 60; // pixel width of the head image on screen (was 80)
     this.playerHead = this.add.image(this.player.x, this.player.y, headKey)
       .setDepth(this.player.depth + 1);
     this.playerHead.setOrigin(0.5, 0.5);
@@ -238,9 +231,11 @@ export class GameScene extends Phaser.Scene {
     // --- Graduation outfit (gown over body, cap on head). Hidden until the
     // player walks past the NASA launchpad — see _syncOutfit().
     this.gownImg = this.add.image(this.player.x, this.player.y, 'gown')
-      .setOrigin(0.5, 0.5).setDepth(this.player.depth + 1).setVisible(false);
+      .setOrigin(0.5, 0.5).setDepth(this.player.depth + 1).setVisible(false)
+      .setScale(this.PLAYER_SCALE);
     this.capImg = this.add.image(this.player.x, this.player.y, 'cap')
-      .setOrigin(0.5, 1).setDepth(this.playerHead.depth + 1).setVisible(false);
+      .setOrigin(0.5, 1).setDepth(this.playerHead.depth + 1).setVisible(false)
+      .setScale(this.PLAYER_SCALE);
     this._graduated = false;
 
     // Balloon constants (slightly stronger lift so longer ropes stay taut).
@@ -251,7 +246,8 @@ export class GameScene extends Phaser.Scene {
 
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
     this.cameras.main.setBounds(0, 0, worldWidth, worldHeight);
-    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+    this.cameras.main.startFollow(this.player, true, 0.08, 0.06);
+    this.cameras.main.setFollowOffset(0, 40);
 
     this.physics.add.collider(this.player, this.platforms);
     this.physics.add.collider(this.enemies, this.platforms);
@@ -319,6 +315,9 @@ export class GameScene extends Phaser.Scene {
     // --- HUD: nice rounded card with apple icon + count.
     this._buildHudPanel(viewW, viewH);
     this._buildTouchControls(viewW, viewH);
+    // Cinematic overlays: subtle warm color grade + radial vignette.
+    this._createColorGrade(viewW, viewH);
+    this._createVignette(viewW, viewH);
 
     this.messageText = this.add.text(viewW / 2, viewH / 2 - 40, '', {
       font: 'bold 36px monospace', color: '#ffeb3b',
@@ -385,6 +384,117 @@ export class GameScene extends Phaser.Scene {
     this.player.setDisplayOrigin(48, 48 + this._walkBob);
   }
 
+  // ---- Game feel helpers -------------------------------------------------
+
+  _hitStop(ms) {
+    if (this._hitStopActive) return;
+    this._hitStopActive = true;
+    this.physics.world.isPaused = true;
+    this.time.delayedCall(ms, () => {
+      this.physics.world.isPaused = false;
+      this._hitStopActive = false;
+    });
+  }
+
+  _squashStretch(kind, fall = 0) {
+    if (!this.player) return;
+    const base = this.PLAYER_SCALE || 1;
+    if (this._squashTween) this._squashTween.stop();
+    let sx, sy, dur;
+    if (kind === 'jump') {
+      sx = base * 0.85; sy = base * 1.18; dur = 130;
+    } else { // land
+      const k = Phaser.Math.Clamp(fall / 800, 0.4, 1.2);
+      sx = base * (1 + 0.2 * k); sy = base * (1 - 0.18 * k); dur = 160;
+    }
+    this.player.setScale(sx, sy);
+    this._squashTween = this.tweens.add({
+      targets: this.player, scaleX: base, scaleY: base,
+      duration: dur, ease: 'Back.Out',
+    });
+  }
+
+  _spawnScorePopup(x, y, text) {
+    const t = this.add.text(x, y, text, {
+      font: 'bold 20px monospace', color: '#ffffff',
+      stroke: '#000', strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(60).setScale(0.6);
+    this.tweens.add({
+      targets: t, scale: 1.2, duration: 110, ease: 'Back.Out',
+      onComplete: () => {
+        this.tweens.add({
+          targets: t, y: y - 36, alpha: 0, duration: 520, ease: 'Quad.Out',
+          onComplete: () => t.destroy(),
+        });
+      },
+    });
+  }
+
+  _jumpPuff() {
+    const px = this.player.x;
+    const py = this.player.y + 24 * (this.PLAYER_SCALE || 1);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const r = 6;
+      const dust = this.add.circle(
+        px + Math.cos(a) * r * 0.3, py + Math.sin(a) * r * 0.3,
+        Phaser.Math.FloatBetween(2.5, 4),
+        0xffffff, 0.85
+      ).setDepth(7);
+      this.tweens.add({
+        targets: dust,
+        x: px + Math.cos(a) * 28,
+        y: py + Math.sin(a) * 14 + 4,
+        alpha: 0, scale: 0.4,
+        duration: 360, ease: 'Quad.Out',
+        onComplete: () => dust.destroy(),
+      });
+    }
+  }
+
+  _landDust(fall) {
+    const k = Phaser.Math.Clamp(fall / 700, 0.5, 1.6);
+    const px = this.player.x;
+    const py = this.player.y + 24 * (this.PLAYER_SCALE || 1);
+    const COUNT = Math.round(10 * k);
+    for (let i = 0; i < COUNT; i++) {
+      const dir = (Math.random() < 0.5 ? -1 : 1);
+      const dust = this.add.circle(
+        px + Phaser.Math.Between(-4, 4),
+        py + Phaser.Math.Between(-2, 2),
+        Phaser.Math.FloatBetween(2.5, 5) * k,
+        0xfff5d8, 0.85
+      ).setDepth(7);
+      this.tweens.add({
+        targets: dust,
+        x: px + dir * Phaser.Math.Between(20, 50) * k,
+        y: py - Phaser.Math.Between(0, 14) * k,
+        alpha: 0, scale: 0.3,
+        duration: Phaser.Math.Between(420, 620), ease: 'Quad.Out',
+        onComplete: () => dust.destroy(),
+      });
+    }
+  }
+
+  _runDust() {
+    const facing = this.player.flipX ? 1 : -1;
+    const px = this.player.x + 6 * facing;
+    const py = this.player.y + 24 * (this.PLAYER_SCALE || 1);
+    const dust = this.add.circle(
+      px, py,
+      Phaser.Math.FloatBetween(2, 3.5),
+      0xfff5d8, 0.7
+    ).setDepth(7);
+    this.tweens.add({
+      targets: dust,
+      x: px + facing * Phaser.Math.Between(14, 26),
+      y: py - Phaser.Math.Between(2, 8),
+      alpha: 0, scale: 0.25,
+      duration: 360, ease: 'Quad.Out',
+      onComplete: () => dust.destroy(),
+    });
+  }
+
   _updatePlayer(time) {
     this.enemies.children.iterate((e) => {
       if (!e?.active) return;
@@ -406,8 +516,24 @@ export class GameScene extends Phaser.Scene {
       // Store impulse magnitude (px/s of downward kick) for one frame so
       // _updateBalloons can consume it.
       this._landingImpulse = Phaser.Math.Clamp((this._prevVy - 100) * 0.45, 0, 320);
+      // Land feedback: dust puff + squash, plus a tiny shake on hard landings.
+      const fall = this._prevVy;
+      this._landDust(fall);
+      this._squashStretch('land', fall);
+      if (fall > 600) this.cameras.main.shake(100, 0.004);
     }
     this._prevVy = this.player.body.velocity.y;
+
+    // Run dust trail while moving on the ground.
+    if (onGround && Math.abs(this.player.body.velocity.x) > 60) {
+      this._runDustTimer = (this._runDustTimer || 0) + 16;
+      if (this._runDustTimer > 130) {
+        this._runDustTimer = 0;
+        this._runDust();
+      }
+    } else {
+      this._runDustTimer = 0;
+    }
 
     const left = this.cursors.left.isDown || this.keys.A.isDown || this.touch.left;
     const right = this.cursors.right.isDown || this.keys.D.isDown || this.touch.right;
@@ -437,6 +563,8 @@ export class GameScene extends Phaser.Scene {
       this.lastJumpPressedAt = -Infinity;
       this.lastGroundedAt = -Infinity;
       this._sfx('jump');
+      this._jumpPuff();
+      this._squashStretch('jump');
     }
 
     const jumpHeld =
@@ -452,9 +580,12 @@ export class GameScene extends Phaser.Scene {
     if (!this.playerHead) return;
     // Sit head image so its bottom rests on the body's neck, with bob+tilt.
     const headHalf = this.playerHead.displayHeight / 2;
-    const bob = this._walkBob || 0;
+    const bob = (this._walkBob || 0) * this.PLAYER_SCALE;
     const tilt = this._walkTilt || 0;
-    this.playerHead.setPosition(this.player.x, this.player.y - 48 + 4 - headHalf - bob);
+    // Neck attach point is at body texture y=4 (origin 48), so center-relative
+    // y = -44 in source pixels — scale that to display pixels.
+    const neckOffset = -44 * this.PLAYER_SCALE;
+    this.playerHead.setPosition(this.player.x, this.player.y + neckOffset - headHalf - bob);
     this.playerHead.setAngle(tilt);
     this.playerHead.setFlipX(this.player.flipX);
     this.playerHead.setTint(this.gameOver ? 0xbbbbbb : 0xffffff);
@@ -469,9 +600,10 @@ export class GameScene extends Phaser.Scene {
       this.gownImg.setVisible(true);
       this.capImg.setVisible(true);
       // Little celebration pop.
+      const targetScale = this.PLAYER_SCALE;
       this.tweens.add({
         targets: [this.gownImg, this.capImg],
-        scale: { from: 0.6, to: 1 },
+        scale: { from: targetScale * 0.6, to: targetScale },
         duration: 280, ease: 'Back.Out',
       });
       this._sfx && this._sfx('win');
@@ -487,10 +619,10 @@ export class GameScene extends Phaser.Scene {
       });
     }
     if (!this._graduated) return;
-    const bob = this._walkBob || 0;
+    const bob = (this._walkBob || 0) * this.PLAYER_SCALE;
     const tilt = this._walkTilt || 0;
     // Gown follows the body, lifted so collar sits at the neck (not waist).
-    this.gownImg.setPosition(this.player.x, this.player.y - 14 - bob);
+    this.gownImg.setPosition(this.player.x, this.player.y - 14 * this.PLAYER_SCALE - bob);
     this.gownImg.setAngle(tilt);
     this.gownImg.setFlipX(this.player.flipX);
     this.gownImg.setVisible(this.player.visible);
@@ -890,10 +1022,12 @@ export class GameScene extends Phaser.Scene {
   // --- Game events --------------------------------------------------------
 
   _collectApple(_p, apple) {
+    const ax = apple.x, ay = apple.y;
     apple.disableBody(true, true);
     this.score += 1;
     this._updateScoreText();
     this._sfx('coin');
+    this._spawnScorePopup(ax, ay - 6, '+1');
     // Quick scale pop on the score card.
     if (this.hudPanel) {
       this.tweens.add({
@@ -924,6 +1058,10 @@ export class GameScene extends Phaser.Scene {
       this.score += 2;
       this._updateScoreText();
       this._sfx('stomp');
+      // Juicy feedback: camera shake + brief hit-stop.
+      this.cameras.main.shake(120, 0.006);
+      this._hitStop(60);
+      this._spawnScorePopup(px, py - 24, '+2');
       return;
     }
 
@@ -938,6 +1076,9 @@ export class GameScene extends Phaser.Scene {
     if (this.balloons.length > 0) {
       this._popOneBalloon();
       this._flashDamage();
+      // Sharp shake + brief white flash.
+      this.cameras.main.shake(160, 0.008);
+      this.cameras.main.flash(80, 255, 255, 255, false);
       if (this.balloons.length === 0) {
         // Last balloon just popped — end the game on the next tick so the
         // pop animation has a moment to play.
@@ -975,6 +1116,7 @@ export class GameScene extends Phaser.Scene {
 
   _reachGoal() {
     this._sfx('win');
+    this.cameras.main.shake(220, 0.005);
     // Bonus mega-confetti if the player reached the flag without losing
     // a SINGLE balloon — a perfect run!
     if (this.balloons && this.balloons.length >= 10) {
@@ -1061,6 +1203,12 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.restartBtn) {
       this.restartBtn.setPosition(gameSize.width / 2, gameSize.height / 2 + 40);
+    }
+    if (this.colorGrade) {
+      this.colorGrade.setSize(gameSize.width, gameSize.height);
+    }
+    if (this.vignette) {
+      this.vignette.setDisplaySize(gameSize.width, gameSize.height);
     }
     this._layoutTouchControls(gameSize.width, gameSize.height);
   }
@@ -2332,14 +2480,149 @@ export class GameScene extends Phaser.Scene {
   _createSky(viewW, viewH) {
     const tex = this.textures.createCanvas('sky', Math.ceil(viewW), Math.ceil(viewH));
     const ctx = tex.getContext();
+    // Multi-stop painterly gradient: deep azure top → warm horizon glow.
     const grad = ctx.createLinearGradient(0, 0, 0, viewH);
-    grad.addColorStop(0, '#3a7bd5');
-    grad.addColorStop(0.55, '#7fb6e8');
-    grad.addColorStop(1, '#dff0fb');
+    grad.addColorStop(0, '#1e3c72');
+    grad.addColorStop(0.35, '#2a5298');
+    grad.addColorStop(0.65, '#7fb6e8');
+    grad.addColorStop(0.85, '#ffd6a5');
+    grad.addColorStop(1, '#ffe8c8');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, viewW, viewH);
+
+    // Soft sun glow positioned high-right.
+    const sunX = viewW * 0.78, sunY = viewH * 0.22;
+    const sunGrad = ctx.createRadialGradient(sunX, sunY, 8, sunX, sunY, viewH * 0.55);
+    sunGrad.addColorStop(0, 'rgba(255, 248, 220, 0.95)');
+    sunGrad.addColorStop(0.1, 'rgba(255, 230, 170, 0.55)');
+    sunGrad.addColorStop(0.35, 'rgba(255, 200, 140, 0.18)');
+    sunGrad.addColorStop(1, 'rgba(255, 200, 140, 0)');
+    ctx.fillStyle = sunGrad;
+    ctx.fillRect(0, 0, viewW, viewH);
+
+    // Sun disc.
+    ctx.fillStyle = '#fff8d8';
+    ctx.beginPath(); ctx.arc(sunX, sunY, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.beginPath(); ctx.arc(sunX - 6, sunY - 6, 10, 0, Math.PI * 2); ctx.fill();
+
     tex.refresh();
     this.add.image(0, 0, 'sky').setOrigin(0, 0).setScrollFactor(0).setDepth(-100);
+  }
+
+  _createMountains(worldWidth, groundY) {
+    // Far-away misty ridge — sits behind the green hills, scrolls slowly.
+    if (!this.textures.exists('mountains')) {
+      const MW = 640, MH = 220;
+      const tex = this.textures.createCanvas('mountains', MW, MH);
+      const ctx = tex.getContext();
+      // Back ridge (lighter, more distant).
+      ctx.fillStyle = '#9bb6d4';
+      ctx.beginPath();
+      ctx.moveTo(0, MH);
+      const peaksBack = [40, 110, 180, 260, 330, 400, 470, 540, 610];
+      const heightsBack = [120, 80, 130, 70, 110, 60, 120, 90, 130];
+      ctx.lineTo(0, MH - 40);
+      peaksBack.forEach((px, i) => ctx.lineTo(px, MH - heightsBack[i]));
+      ctx.lineTo(MW, MH - 40);
+      ctx.lineTo(MW, MH); ctx.closePath(); ctx.fill();
+      // Front ridge (darker, slightly lower).
+      ctx.fillStyle = '#6f8eb0';
+      ctx.beginPath();
+      ctx.moveTo(0, MH);
+      const peaksFront = [60, 140, 220, 300, 380, 460, 540, 620];
+      const heightsFront = [80, 130, 90, 150, 100, 140, 85, 110];
+      ctx.lineTo(0, MH - 30);
+      peaksFront.forEach((px, i) => ctx.lineTo(px, MH - heightsFront[i]));
+      ctx.lineTo(MW, MH - 30);
+      ctx.lineTo(MW, MH); ctx.closePath(); ctx.fill();
+      // Snow caps on front ridge.
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      peaksFront.forEach((px, i) => {
+        const py = MH - heightsFront[i];
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(px - 12, py + 18);
+        ctx.lineTo(px + 12, py + 18);
+        ctx.closePath(); ctx.fill();
+      });
+      // Atmospheric haze near base.
+      const haze = ctx.createLinearGradient(0, MH - 80, 0, MH);
+      haze.addColorStop(0, 'rgba(220, 230, 245, 0.0)');
+      haze.addColorStop(1, 'rgba(220, 230, 245, 0.55)');
+      ctx.fillStyle = haze;
+      ctx.fillRect(0, MH - 80, MW, 80);
+      tex.refresh();
+    }
+    const count = Math.ceil(worldWidth / 580) + 1;
+    for (let i = 0; i < count; i++) {
+      this.add.image(i * 580 - 40, groundY + 20, 'mountains')
+        .setOrigin(0, 1).setScrollFactor(0.18).setDepth(-92).setAlpha(0.9);
+    }
+  }
+
+  _createAmbientDust(viewW, viewH) {
+    // Slow-drifting motes/petals across the screen for atmospheric depth.
+    // Screen-fixed (scrollFactor 0) so they float regardless of camera.
+    const COUNT = 18;
+    for (let i = 0; i < COUNT; i++) {
+      const x = Phaser.Math.Between(0, viewW);
+      const y = Phaser.Math.Between(0, viewH);
+      const r = Phaser.Math.FloatBetween(1.2, 2.6);
+      const dot = this.add.circle(x, y, r, 0xffffff, Phaser.Math.FloatBetween(0.18, 0.45))
+        .setScrollFactor(0).setDepth(140).setBlendMode(Phaser.BlendModes.ADD);
+      const dur = Phaser.Math.Between(9000, 18000);
+      const dx = Phaser.Math.Between(40, 140);
+      const dy = Phaser.Math.Between(-40, 40);
+      this.tweens.add({
+        targets: dot,
+        x: x + dx, y: y + dy,
+        alpha: { from: dot.alpha, to: 0 },
+        duration: dur, ease: 'sine.inOut',
+        onComplete: () => {
+          dot.x = Phaser.Math.Between(-20, viewW + 20);
+          dot.y = Phaser.Math.Between(0, viewH);
+          dot.setAlpha(Phaser.Math.FloatBetween(0.18, 0.45));
+          this.tweens.add({
+            targets: dot,
+            x: dot.x + Phaser.Math.Between(40, 140),
+            y: dot.y + Phaser.Math.Between(-40, 40),
+            alpha: 0,
+            duration: Phaser.Math.Between(9000, 18000),
+            ease: 'sine.inOut',
+            onComplete: () => dot.destroy(),
+          });
+        },
+      });
+    }
+  }
+
+  _createColorGrade(viewW, viewH) {
+    // Thin warm tint over the whole screen \u2014 unifies the palette.
+    this.colorGrade = this.add.rectangle(0, 0, viewW, viewH, 0xffd9a8, 0.07)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(148)
+      .setBlendMode(Phaser.BlendModes.MULTIPLY);
+  }
+
+  _createVignette(viewW, viewH) {
+    // Radial darkening at the corners. Generated as a canvas texture.
+    const key = 'vignette';
+    if (!this.textures.exists(key)) {
+      const tex = this.textures.createCanvas(key, Math.ceil(viewW), Math.ceil(viewH));
+      const ctx = tex.getContext();
+      const grad = ctx.createRadialGradient(
+        viewW / 2, viewH / 2, Math.min(viewW, viewH) * 0.35,
+        viewW / 2, viewH / 2, Math.max(viewW, viewH) * 0.75
+      );
+      grad.addColorStop(0, 'rgba(0,0,0,0)');
+      grad.addColorStop(0.6, 'rgba(0,0,0,0.18)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.55)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, viewW, viewH);
+      tex.refresh();
+    }
+    this.vignette = this.add.image(0, 0, key)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(149);
   }
 
   _createClouds(worldWidth, viewH) {
@@ -2347,7 +2630,20 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < count; i++) {
       const x = i * 280 + Phaser.Math.Between(0, 140);
       const y = Phaser.Math.Between(40, Math.max(80, viewH * 0.35));
-      this.add.image(x, y, 'cloud').setScrollFactor(0.2).setAlpha(0.95).setDepth(-90);
+      // Two tiers of clouds for depth: distant (slower, smaller, fainter)
+      // and near (a touch larger and brighter).
+      const distant = (i % 2 === 0);
+      const c = this.add.image(x, y, 'cloud')
+        .setScrollFactor(distant ? 0.12 : 0.28)
+        .setAlpha(distant ? 0.55 : 0.85)
+        .setScale(distant ? 0.85 : 1.15)
+        .setDepth(distant ? -95 : -88);
+      // Gentle drift.
+      const drift = Phaser.Math.Between(60, 140) * (distant ? 0.5 : 1);
+      this.tweens.add({
+        targets: c, x: c.x + drift, duration: Phaser.Math.Between(18000, 28000),
+        yoyo: true, repeat: -1, ease: 'sine.inOut',
+      });
     }
   }
 
