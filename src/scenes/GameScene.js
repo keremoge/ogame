@@ -79,30 +79,39 @@ export class GameScene extends Phaser.Scene {
       [2800, groundY - 140, 3], [3060, groundY - 200, 3],
       [3320, groundY - 260, 4], [3600, groundY - 150, 3],
       [3880, groundY - 210, 3],
-
-      // ---- Sky towers between graduation and the finish line ----
-      // Stacked zig-zag bench platforms so the player can climb really high
-      // in the NASA / post-graduation stretch. Vertical gap ~120 px is well
-      // within the player's jump arc (~240 px apex).
-      // Tower A — just past graduation.
-      [2360, groundY - 320, 2], [2460, groundY - 440, 2],
-      [2360, groundY - 560, 2], [2460, groundY - 680, 2],
-      [2380, groundY - 800, 3],
-
-      // Tower B — mid stretch.
-      [2920, groundY - 350, 2], [3020, groundY - 470, 2],
-      [2920, groundY - 590, 2], [3020, groundY - 710, 2],
-      [2940, groundY - 830, 3],
-
-      // Tower C — late stretch.
-      [3450, groundY - 320, 2], [3550, groundY - 440, 2],
-      [3450, groundY - 560, 2], [3550, groundY - 680, 2],
-      [3470, groundY - 800, 3],
-
-      // Tower D — final climb before the flag.
-      [3920, groundY - 310, 2], [4020, groundY - 430, 2],
-      [3920, groundY - 550, 2], [4010, groundY - 670, 3],
     ];
+
+    // ---- Sky towers between graduation and the finish line ----
+    // Stacked zig-zag bench platforms so the player can climb really high
+    // in the NASA / post-graduation stretch. Vertical gap ~120 px is well
+    // within the player's jump arc (~240 px apex). The towers are spread
+    // EVENLY between graduation and the finish line so there's never a long
+    // empty stretch at the end of the level.
+    const gradX = (this._graduateAtX != null) ? this._graduateAtX : worldWidth * 0.55;
+    const finishX = worldWidth - 100;
+    const span = finishX - gradX;
+    if (span > 400) {
+      // Pick a count that keeps each tower comfortably ~500-650 px apart.
+      const towerCount = Math.max(4, Math.min(7, Math.round(span / 560)));
+      const margin = 220; // keep clear of the graduation point and the flag
+      const usable = span - margin * 2;
+      const step = usable / Math.max(1, towerCount - 1);
+      for (let i = 0; i < towerCount; i++) {
+        const baseX = Math.round(gradX + margin + i * step);
+        // Alternate the zig-zag direction per tower for variety.
+        const dir = (i % 2 === 0) ? 1 : -1;
+        const xLeft = baseX;
+        const xRight = baseX + 100 * dir;
+        // 4 stacked tiers + a wider top platform.
+        benches.push(
+          [xLeft,  groundY - 320, 2],
+          [xRight, groundY - 440, 2],
+          [xLeft,  groundY - 560, 2],
+          [xRight, groundY - 680, 2],
+          [Math.round(baseX + 20 * dir), groundY - 800, 3],
+        );
+      }
+    }
     benches.forEach(([px, py, len]) => {
       for (let i = 0; i < len; i++) {
         this.platforms.create(px + i * 32, py, 'bench').refreshBody();
