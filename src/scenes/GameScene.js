@@ -441,130 +441,181 @@ export class GameScene extends Phaser.Scene {
     const b = this.balloons.pop();
     const x = b.pos.x, y = b.pos.y, color = b.color, scale = b.scale;
 
-    // Balloon rapidly puffs up and fades.
+    // --- Stage 1: Anticipation — balloon stretches sideways for ONE frame
+    // before exploding. This little "squish" sells the pop hugely.
     this.tweens.add({
       targets: b.img,
-      scale: scale * 2, alpha: 0,
-      duration: 140, ease: 'Quad.Out',
-      onComplete: () => b.img.destroy(),
+      scaleX: scale * 1.45,
+      scaleY: scale * 0.7,
+      duration: 50, ease: 'Quad.Out',
+      onComplete: () => {
+        // Stage 2: balloon vanishes instantly (it has been replaced by the
+        // shrapnel pieces below).
+        this.tweens.add({
+          targets: b.img,
+          scale: scale * 2.4, alpha: 0,
+          duration: 90, ease: 'Quad.Out',
+          onComplete: () => b.img.destroy(),
+        });
+      },
     });
 
-    // --- Layer 1: chunky rubber shards from the balloon skin ---
-    const N = 28;
-    for (let i = 0; i < N; i++) {
-      const ang = (i / N) * Math.PI * 2 + Phaser.Math.FloatBetween(-0.22, 0.22);
-      const speed = Phaser.Math.Between(140, 320);
-      const piece = this.add.rectangle(
-        x, y,
-        Phaser.Math.Between(5, 11),
-        Phaser.Math.Between(2, 6),
-        color,
-      ).setDepth(8).setRotation(ang);
+    // --- Layer 1: Long curly rubber strips (real popped balloon look) ---
+    // Each strip is an elongated rubber-coloured rectangle that flies out
+    // and tumbles wildly while shrinking — like the deflated rubber skin.
+    const STRIPS = 14;
+    for (let i = 0; i < STRIPS; i++) {
+      const ang = (i / STRIPS) * Math.PI * 2 + Phaser.Math.FloatBetween(-0.18, 0.18);
+      const speed = Phaser.Math.Between(180, 360);
+      const len = Phaser.Math.Between(18, 34);
+      const strip = this.add.rectangle(x, y, len, 4, color)
+        .setDepth(8)
+        .setRotation(ang);
+      // Tiny lighter highlight on the strip so it reads as rubber.
+      const high = this.add.rectangle(x, y, len * 0.6, 1, 0xffffff, 0.6)
+        .setDepth(9)
+        .setRotation(ang);
+      const tx = x + Math.cos(ang) * speed;
+      const ty = y + Math.sin(ang) * speed + Phaser.Math.Between(80, 180);
+      const spin = Phaser.Math.Between(-900, 900);
       this.tweens.add({
-        targets: piece,
-        x: x + Math.cos(ang) * speed,
-        y: y + Math.sin(ang) * speed + Phaser.Math.Between(60, 130),
+        targets: [strip, high],
+        x: tx, y: ty,
         alpha: 0,
-        angle: Phaser.Math.Between(-540, 540),
-        scaleX: 0.2, scaleY: 0.2,
-        duration: Phaser.Math.Between(550, 850),
+        angle: spin,
+        scaleX: 0.15, scaleY: 0.35,
+        duration: Phaser.Math.Between(700, 1000),
         ease: 'Quad.Out',
-        onComplete: () => piece.destroy(),
+        onComplete: () => { strip.destroy(); high.destroy(); },
       });
     }
 
-    // --- Layer 2: bright multi-coloured confetti ---
-    const confettiColors = [0xff3b30, 0xffcc00, 0x34c759, 0x00c7ff, 0xff2d92, 0xaf52de, 0xffffff];
+    // --- Layer 2: Tiny rubber dust (small squares from the balloon skin) ---
     for (let i = 0; i < 22; i++) {
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
-      const speed = Phaser.Math.Between(80, 260);
+      const speed = Phaser.Math.Between(60, 200);
+      const dust = this.add.rectangle(
+        x, y,
+        Phaser.Math.Between(2, 4),
+        Phaser.Math.Between(2, 4),
+        color,
+      ).setDepth(8);
+      this.tweens.add({
+        targets: dust,
+        x: x + Math.cos(ang) * speed,
+        y: y + Math.sin(ang) * speed + Phaser.Math.Between(40, 100),
+        alpha: 0,
+        scale: 0.2,
+        duration: Phaser.Math.Between(450, 700),
+        ease: 'Quad.Out',
+        onComplete: () => dust.destroy(),
+      });
+    }
+
+    // --- Layer 3: Multi-coloured confetti fountain ---
+    const confettiColors = [0xff3b30, 0xffcc00, 0x34c759, 0x00c7ff, 0xff2d92, 0xaf52de, 0xffffff];
+    for (let i = 0; i < 26; i++) {
+      const ang = Phaser.Math.FloatBetween(-Math.PI, 0); // mostly upward fountain
+      const speed = Phaser.Math.Between(120, 320);
       const c = confettiColors[Phaser.Math.Between(0, confettiColors.length - 1)];
       const conf = this.add.rectangle(
         x, y,
         Phaser.Math.Between(3, 6),
-        Phaser.Math.Between(6, 12),
+        Phaser.Math.Between(7, 14),
         c,
       ).setDepth(9).setRotation(Phaser.Math.FloatBetween(0, Math.PI * 2));
       this.tweens.add({
         targets: conf,
-        x: x + Math.cos(ang) * speed + Phaser.Math.Between(-30, 30),
-        y: y + Math.sin(ang) * speed + Phaser.Math.Between(120, 220), // heavier droop
+        x: x + Math.cos(ang) * speed + Phaser.Math.Between(-40, 40),
+        y: y + Math.sin(ang) * speed + Phaser.Math.Between(160, 280), // gravity
         alpha: 0,
         angle: Phaser.Math.Between(-720, 720),
-        duration: Phaser.Math.Between(700, 1100),
+        duration: Phaser.Math.Between(800, 1200),
         ease: 'Quad.Out',
         onComplete: () => conf.destroy(),
       });
     }
 
-    // --- Layer 3: yellow/white sparkle stars ---
-    for (let i = 0; i < 10; i++) {
+    // --- Layer 4: Sparkle bursts at random offsets (twinkles) ---
+    for (let i = 0; i < 14; i++) {
       const ang = Phaser.Math.FloatBetween(0, Math.PI * 2);
-      const speed = Phaser.Math.Between(60, 180);
-      const spark = this.add.star(x, y, 4, 2, 6, 0xfff59d).setDepth(10);
+      const dist = Phaser.Math.Between(10, 40);
+      const sx = x + Math.cos(ang) * dist;
+      const sy = y + Math.sin(ang) * dist;
+      const spark = this.add.star(sx, sy, 4, 1, 5, 0xffffff)
+        .setDepth(10)
+        .setScale(0);
+      const delay = Phaser.Math.Between(0, 180);
       this.tweens.add({
         targets: spark,
-        x: x + Math.cos(ang) * speed,
-        y: y + Math.sin(ang) * speed,
-        alpha: 0,
-        scale: Phaser.Math.FloatBetween(0.2, 0.6),
-        angle: Phaser.Math.Between(-360, 360),
-        duration: Phaser.Math.Between(380, 620),
-        ease: 'Quad.Out',
-        onComplete: () => spark.destroy(),
+        scale: Phaser.Math.FloatBetween(0.6, 1.1),
+        duration: 120, ease: 'Back.Out',
+        delay,
+        onComplete: () => {
+          this.tweens.add({
+            targets: spark, scale: 0, alpha: 0,
+            duration: 180, ease: 'Quad.In',
+            onComplete: () => spark.destroy(),
+          });
+        },
       });
     }
 
-    // --- Layer 4: double flash rings (white + balloon-colour) ---
+    // --- Layer 5: Outward shockwave — TWO concentric rings ---
     const ring1 = this.add.circle(x, y, 8, 0xffffff, 0.95).setDepth(7);
     this.tweens.add({
-      targets: ring1, radius: 48, alpha: 0,
-      duration: 280, ease: 'Quad.Out',
+      targets: ring1, radius: 56, alpha: 0,
+      duration: 320, ease: 'Quad.Out',
       onComplete: () => ring1.destroy(),
     });
-    const ring2 = this.add.circle(x, y, 4, color, 0.7).setDepth(7);
+    const ring2 = this.add.circle(x, y, 4, color, 0.75).setDepth(7);
     this.tweens.add({
-      targets: ring2, radius: 64, alpha: 0,
-      duration: 360, ease: 'Quad.Out',
+      targets: ring2, radius: 80, alpha: 0,
+      duration: 420, ease: 'Quad.Out',
       onComplete: () => ring2.destroy(),
     });
 
-    // --- Layer 5: bright central flash blob ---
-    const flash = this.add.circle(x, y, 22, 0xffffff, 1).setDepth(11);
+    // --- Layer 6: bright central white-out flash ---
+    const flash = this.add.circle(x, y, 26, 0xffffff, 1).setDepth(11);
     this.tweens.add({
-      targets: flash, scale: 0.2, alpha: 0,
-      duration: 180, ease: 'Quad.Out',
+      targets: flash, scale: 0.15, alpha: 0,
+      duration: 200, ease: 'Quad.Out',
       onComplete: () => flash.destroy(),
     });
 
-    // --- Layer 6: spiky impact star ---
-    const impact = this.add.star(x, y, 8, 6, 24, 0xffeb3b).setDepth(11);
+    // --- Layer 7: Big spiky impact star (cartoon "BOOM") ---
+    const impact = this.add.star(x, y, 12, 8, 30, 0xffeb3b).setDepth(11);
     this.tweens.add({
-      targets: impact, scale: 2.2, alpha: 0, angle: 90,
-      duration: 260, ease: 'Quad.Out',
+      targets: impact, scale: 2.4, alpha: 0, angle: 60,
+      duration: 300, ease: 'Quad.Out',
       onComplete: () => impact.destroy(),
     });
+    // Inner orange star for depth.
+    const impact2 = this.add.star(x, y, 8, 4, 18, 0xff6f00).setDepth(11);
+    this.tweens.add({
+      targets: impact2, scale: 1.8, alpha: 0, angle: -45,
+      duration: 260, ease: 'Quad.Out',
+      onComplete: () => impact2.destroy(),
+    });
 
-    // --- Layer 7: "PAATTT!" text with bounce ---
+    // --- Layer 8: "PAATTT!" text with overshoot bounce ---
     const pop = this.add.text(x, y - 4, 'PAATTT!', {
       font: 'bold 34px monospace', color: '#ffeb3b',
       stroke: '#000', strokeThickness: 6,
     }).setOrigin(0.5).setDepth(12).setScale(0.2);
     this.tweens.add({
       targets: pop,
-      scale: 1.3,
-      duration: 140, ease: 'Back.Out',
+      scale: 1.4,
+      angle: Phaser.Math.Between(-8, 8),
+      duration: 160, ease: 'Back.Out',
       onComplete: () => {
         this.tweens.add({
-          targets: pop, y: y - 44, alpha: 0, scale: 1.6,
-          duration: 480, ease: 'Quad.Out',
+          targets: pop, y: y - 50, alpha: 0, scale: 1.7,
+          duration: 520, ease: 'Quad.Out',
           onComplete: () => pop.destroy(),
         });
       },
     });
-
-    // Camera shake for that satisfying THUMP.
-    this.cameras.main.shake(180, 0.008);
 
     this._sfx('pop');
   }
