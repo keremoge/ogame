@@ -86,14 +86,52 @@ export class GameScene extends Phaser.Scene {
       }
     });
 
-    // --- Apples.
+    // --- Apples. Drawn 4× larger than the source texture so they really
+    // pop against the world.
     this.apples = this.physics.add.group({ allowGravity: false, immovable: true });
+    const APPLE_SCALE = 4;
+
+    // Apples that sit on top of the existing benches.
     benches.forEach(([px, py, len]) => {
       const ax = px + Math.floor(len / 2) * 32;
-      const ay = py - 20;
+      const ay = py - 36; // lifted higher so the bigger apple sits cleanly on the bench
       const apple = this.apples.create(ax, ay, 'apple');
+      apple.setScale(APPLE_SCALE);
+      apple.body.setSize(16, 16).setOffset(0, 0);
+      apple.refreshBody();
       this.tweens.add({
-        targets: apple, y: ay - 5, duration: 800,
+        targets: apple, y: ay - 8, duration: 800,
+        ease: 'sine.inOut', yoyo: true, repeat: -1,
+      });
+    });
+
+    // High-altitude bouncing apples — placed UP IN THE SKY so the player has
+    // to time jumps to catch them. They bob with a larger amplitude and a
+    // bouncier ease, like floating fruit.
+    const skyApples = [
+      // Reachable with a normal jump from the ground (~240px max).
+      [380,  groundY - 200], [1140, groundY - 210], [1900, groundY - 220],
+      [2620, groundY - 200], [3240, groundY - 215], [3780, groundY - 205],
+      // Higher ones — reachable by jumping off a nearby bench.
+      [820,  groundY - 320], [1580, groundY - 340], [2200, groundY - 360],
+      [2940, groundY - 330], [3500, groundY - 350],
+    ];
+    skyApples.forEach(([ax, ay]) => {
+      const apple = this.apples.create(ax, ay, 'apple');
+      apple.setScale(APPLE_SCALE);
+      apple.body.setSize(16, 16).setOffset(0, 0);
+      apple.refreshBody();
+      // Bigger, springy bob so they look like they're hopping in the air.
+      const amp = Phaser.Math.Between(22, 36);
+      const dur = Phaser.Math.Between(700, 1100);
+      this.tweens.add({
+        targets: apple, y: ay - amp, duration: dur,
+        ease: 'sine.inOut', yoyo: true, repeat: -1,
+      });
+      // Subtle wobble to break the uniformity.
+      this.tweens.add({
+        targets: apple, angle: Phaser.Math.Between(-8, -3),
+        duration: Phaser.Math.Between(900, 1400),
         ease: 'sine.inOut', yoyo: true, repeat: -1,
       });
     });
