@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <title>ogame — Güzide School Adventure</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        height: 100%;
+        width: 100%;
+        overflow: hidden;
+        font-family: monospace;
+        color: #fff;
+        /* Prevent iOS double-tap zoom / pull-to-refresh / text selection */
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        overscroll-behavior: none;
+      }
+      #game {
+        width: 100vw;
+        height: 100vh;
+      }
+      #game canvas {
+        display: block;
+        touch-action: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
