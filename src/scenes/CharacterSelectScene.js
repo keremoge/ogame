@@ -488,13 +488,38 @@ export class CharacterSelectScene extends Phaser.Scene {
    */
   async _segmentPerson(img) {
     if (!this._segmenter) {
-      // Dynamic ESM import — tasks-vision is shipped as ES modules only.
-      const vision = await import(
-        /* @vite-ignore */
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs'
-      );
-      const fileset = await vision.FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+      // ----------------------------------------------------------------
+      // Samsung Internet kill-switch.
+      // On Samsung Internet (and a few other Android WebViews), one of:
+      //   - dynamic import() of the remote MediaPipe ESM bundle,
+      //   - FilesetResolver.forVisionTasks (WASM fetch),
+      //   - or the TFLite GPU shader compile inside createFromOptions(),
+      // hangs silently and never resolves and never throws. The user is
+      // stuck on "Arka plan kaldırılıyor…" forever. The same device works
+      // perfectly in Chrome, so this is purely a Samsung Internet issue.
+      // Refuse to even try MediaPipe on that browser — _processImage()
+      // will catch the throw and use the oval-mask fallback, which gives
+      // the user a usable character in under a second.
+      // ----------------------------------------------------------------
+      const ua = (navigator.userAgent || '').toLowerCase();
+      if (ua.includes('samsungbrowser')) {
+        throw new Error('Samsung Internet: MediaPipe atlandı');
+      }
+
+      // Wrap the dynamic import + FilesetResolver in ONE timeout so a
+      // hung remote ESM fetch can't keep the spinner running forever.
+      const initFileset = (async () => {
+        const vision = await import(
+          /* @vite-ignore */
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs'
+        );
+        const fileset = await vision.FilesetResolver.forVisionTasks(
+          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+        );
+        return { vision, fileset };
+      })();
+      const { vision, fileset } = await withTimeout(
+        initFileset, 12000, 'MediaPipe yuk timeout',
       );
       const modelAssetPath =
         'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
