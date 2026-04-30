@@ -422,17 +422,23 @@ export class CharacterSelectScene extends Phaser.Scene {
       return;
     }
 
-    this._setStatus('Arka plan kaldırılıyor…');
+    this._setStatus('Arka plan kaldırılıyor… (ilk seferde model indirilir)');
     let segMask;
     try {
-      segMask = await this._segmentPerson(img);
+      // Hard timeout: on some Samsung Internet / Android WebView builds
+      // MediaPipe init or segment() can hang silently (no throw), leaving
+      // the user staring at the spinner forever. Cap it at 18 s and fall
+      // back to an oval head mask if it doesn't finish.
+      segMask = await withTimeout(this._segmentPerson(img), 18000, 'segmentation timeout');
     } catch (e) {
-      console.error(e);
-      // Show the actual error so we can diagnose Android-specific issues
-      // (GPU shader compile, WASM fetch blocked, OOM, etc.).
+      console.warn('Segmentation failed, using oval fallback:', e);
       const msg = e && e.message ? e.message : String(e);
-      this._setStatus('Arka plan kaldırılamadı: ' + msg, 'error');
-      return;
+      this._setStatus('Arka plan kaldırılamadı (' + msg + '), oval kırpılacak…', 'error');
+      // Fallback: synthesize a feathered oval mask around the detected
+      // face box. Result is a sticker-ish head crop with soft edges — not
+      // pixel-perfect like MediaPipe, but always works and lets the user
+      // continue into the game.
+      segMask = buildOvalHeadMask(img, bestDet);
     }
 
     const dataUrl = cropFaceToDataUrl(img, bestDet, segMask);
@@ -493,25 +499,35 @@ export class CharacterSelectScene extends Phaser.Scene {
       const modelAssetPath =
         'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
       // GPU delegate is much faster but is unreliable on many Android
-      // Chrome / WebView builds (TFLite GPU shader compile fails on some
-      // Mali / Adreno drivers) and on some desktop browsers without WebGL2.
-      // Try GPU first, then fall back to CPU so the user always gets a
-      // working segmenter rather than the generic "Arka plan kaldırılamadı".
+      // Chrome / Samsung Internet / WebView builds (TFLite GPU shader
+      // compile silently hangs on some Mali / Adreno drivers). Try GPU
+      // first with a hard timeout, then fall back to CPU. We also wrap
+      // the CPU attempt in a timeout so a stuck WASM fetch (no network,
+      // captive portal, blocked CDN) eventually surfaces an error instead
+      // of leaving the user staring at the spinner.
       try {
-        this._segmenter = await vision.ImageSegmenter.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath, delegate: 'GPU' },
-          runningMode: 'IMAGE',
-          outputCategoryMask: true,
-          outputConfidenceMasks: false,
-        });
+        this._segmenter = await withTimeout(
+          vision.ImageSegmenter.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath, delegate: 'GPU' },
+            runningMode: 'IMAGE',
+            outputCategoryMask: true,
+            outputConfidenceMasks: false,
+          }),
+          10000,
+          'GPU segmenter init timeout',
+        );
       } catch (gpuErr) {
         console.warn('MediaPipe GPU delegate failed, retrying with CPU', gpuErr);
-        this._segmenter = await vision.ImageSegmenter.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath, delegate: 'CPU' },
-          runningMode: 'IMAGE',
-          outputCategoryMask: true,
-          outputConfidenceMasks: false,
-        });
+        this._segmenter = await withTimeout(
+          vision.ImageSegmenter.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath, delegate: 'CPU' },
+            runningMode: 'IMAGE',
+            outputCategoryMask: true,
+            outputConfidenceMasks: false,
+          }),
+          15000,
+          'CPU segmenter init timeout',
+        );
       }
     }
 
@@ -814,6 +830,54 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+/**
+ * Race a promise against a timeout. Rejects with `new Error(label)` if
+ * the promise has not settled within `ms` milliseconds. The original
+ * promise keeps running (we can't cancel arbitrary work) but the caller
+ * is unblocked so the UI can recover.
+ */
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(label || 'timeout')), ms);
+    promise.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
+/**
+ * Build a feathered-oval head mask the same size as `img`, used as a
+ * fallback when MediaPipe segmentation fails (Samsung Internet, old
+ * Android WebView, blocked WASM fetch, hung GPU delegate, etc.). The
+ * oval is sized from the face-api bbox to also include hair on top.
+ * Returns an HTMLCanvasElement with WHITE pixels inside the oval and
+ * a soft alpha falloff at the edges, ready to be used as a mask via
+ * destination-in compositing in cropFaceToDataUrl().
+ */
+function buildOvalHeadMask(img, det) {
+  const W = img.width, H = img.height;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  const box = det.detection.box;
+  // Center the oval on the face box, but extend upward to include hair
+  // and slightly downward to include the chin. Width is a touch wider
+  // than the face box so ears come along too.
+  const cx = box.x + box.width  / 2;
+  const cy = box.y + box.height / 2 - box.height * 0.15;
+  const rx = box.width  * 0.78;
+  const ry = box.height * 0.95;
+  // Soft edge via shadowBlur (works on every browser).
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = '#fff';
+  ctx.shadowBlur = Math.max(8, Math.min(W, H) * 0.012);
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+  return c;
 }
 
 // =====================================================================
