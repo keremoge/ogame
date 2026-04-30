@@ -637,8 +637,71 @@ function cropFaceToDataUrl(img, det, segMaskCanvas) {
   octx.drawImage(segMaskCanvas, wx0, wy0, ww, wh, 0, 0, W, H);
   octx.globalCompositeOperation = 'source-over';
 
+  // 2b) Multi-face safety: if there are OTHER people near the chosen face,
+  //     the segmentation mask will also have their hair/face pixels and
+  //     they can leak into the crop window. Keep only the connected blob
+  //     of opaque pixels that contains the chosen face's center, so any
+  //     neighbouring person's head is dropped.
+  keepConnectedBlobAt(out,
+    Math.round(box.x + box.width  / 2 - wx0),
+    Math.round(box.y + box.height / 2 - wy0),
+  );
+
   // 3) Tight-crop alpha bbox into a CROP_SIZE square (head bottom-aligned).
   return tightCropToAlphaBottomAligned(out);
+}
+
+/**
+ * In-place: keep only the connected component of non-transparent pixels
+ * that contains the seed pixel (sx, sy); make every other pixel
+ * transparent. Uses a 4-neighbour BFS over a Uint8Array visited map.
+ *
+ * This is what lets us pick "the most prominent face" cleanly when the
+ * source photo contains more than one person — the chosen face's flood
+ * fill stays inside its own head silhouette, and any other heads that
+ * happen to be inside the crop window simply get erased.
+ */
+function keepConnectedBlobAt(canvas, sx, sy) {
+  const w = canvas.width, h = canvas.height;
+  if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+  const ALPHA_THRESHOLD = 24;
+  // If the seed itself is transparent, find the nearest opaque pixel
+  // (face landmark center can land on a hair-shaved area or background
+  // gap). Search outward in a small spiral.
+  const isOpaque = (x, y) => data[(y * w + x) * 4 + 3] > ALPHA_THRESHOLD;
+  if (!isOpaque(sx, sy)) {
+    let found = false;
+    for (let r = 1; r < 60 && !found; r++) {
+      for (let dy = -r; dy <= r && !found; dy++) {
+        for (let dx = -r; dx <= r && !found; dx++) {
+          const nx = sx + dx, ny = sy + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          if (isOpaque(nx, ny)) { sx = nx; sy = ny; found = true; }
+        }
+      }
+    }
+    if (!found) return;
+  }
+  const visited = new Uint8Array(w * h);
+  const stack = [sx + sy * w];
+  visited[sx + sy * w] = 1;
+  while (stack.length) {
+    const idx = stack.pop();
+    const x = idx % w;
+    const y = (idx - x) / w;
+    if (x > 0     && !visited[idx - 1] && isOpaque(x - 1, y)) { visited[idx - 1] = 1; stack.push(idx - 1); }
+    if (x < w - 1 && !visited[idx + 1] && isOpaque(x + 1, y)) { visited[idx + 1] = 1; stack.push(idx + 1); }
+    if (y > 0     && !visited[idx - w] && isOpaque(x, y - 1)) { visited[idx - w] = 1; stack.push(idx - w); }
+    if (y < h - 1 && !visited[idx + w] && isOpaque(x, y + 1)) { visited[idx + w] = 1; stack.push(idx + w); }
+  }
+  // Wipe alpha for every non-visited pixel.
+  for (let i = 0; i < visited.length; i++) {
+    if (!visited[i]) data[i * 4 + 3] = 0;
+  }
+  ctx.putImageData(imgData, 0, 0);
 }
 
 /**
