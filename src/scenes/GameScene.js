@@ -48,7 +48,14 @@ export class GameScene extends Phaser.Scene {
 
     const viewW = this.scale.width;
     const viewH = this.scale.height;
-    const worldWidth = Math.max(4200, viewW * 5);
+    // On phone-sized viewports we stretch the level horizontally so the
+    // jumping benches don't appear stacked on top of each other (the
+    // screen is narrow, so without this 2-3 benches end up visible at
+    // once and feel cramped). Buildings, NASA, trees etc. all derive
+    // from worldWidth so they spread proportionally.
+    const isPhone = Math.min(viewW, viewH) <= 700;
+    this.BENCH_SPREAD = isPhone ? 1.55 : 1.0;
+    const worldWidth = Math.max(4200, viewW * 5) * this.BENCH_SPREAD;
     const worldHeight = viewH;
     const groundY = worldHeight - 64;
 
@@ -86,6 +93,16 @@ export class GameScene extends Phaser.Scene {
       [3320, groundY - 260, 4], [3600, groundY - 150, 3],
       [3880, groundY - 210, 3],
     ];
+
+    // On phone-sized viewports the benches feel “stacked” — the screen
+    // is narrow, the player big, so two adjacent benches often appear on
+    // screen at the same time. Stretch the spacing horizontally so they
+    // read as separate stepping stones. The spread factor was already
+    // baked into worldWidth above so the rest of the level keeps pace.
+    if (this.BENCH_SPREAD && this.BENCH_SPREAD !== 1) {
+      const SPREAD = this.BENCH_SPREAD;
+      benches.forEach((b) => { b[0] = Math.round(b[0] * SPREAD); });
+    }
 
     // ---- Sky outposts between graduation and the finish line ----
     // Short two-step zig-zag platforms (NOT towers) so the post-graduation
@@ -155,6 +172,12 @@ export class GameScene extends Phaser.Scene {
       [820,  groundY - 320], [1580, groundY - 330], [2200, groundY - 320],
       [2940, groundY - 330], [3500, groundY - 320],
     ];
+    // Match the bench horizontal spread so high-altitude vitamins stay
+    // aligned with their nearby benches on phone-stretched levels.
+    if (this.BENCH_SPREAD && this.BENCH_SPREAD !== 1) {
+      const S = this.BENCH_SPREAD;
+      skyApples.forEach((a) => { a[0] = Math.round(a[0] * S); });
+    }
     skyApples.forEach(([ax, ay]) => {
       const apple = this.apples.create(ax, ay, randFruit());
       apple.setScale(0.5);
@@ -1467,9 +1490,20 @@ export class GameScene extends Phaser.Scene {
     wireHold(this.touchBtnJump,  'jump');
 
     // Hide on devices without touch (e.g. desktop with mouse only).
+    // Robust detection: many Android browsers don't expose `ontouchstart`
+    // in `window` at module-eval time, and some desktops with touch screens
+    // also report touch points. The `pointer: coarse` media query is the
+    // modern reliable indicator for a finger-driven primary input. We
+    // also force-show the controls on small viewports so phones in any
+    // browser (incl. WebViews) always get the buttons.
+    const matchCoarse = (typeof globalThis.matchMedia === 'function')
+      ? globalThis.matchMedia('(pointer: coarse)').matches : false;
+    const matchSmall = Math.min(viewW, viewH) <= 820; // covers all phones / small tablets
     const isTouch =
-      ('ontouchstart' in window) ||
-      (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+      ('ontouchstart' in globalThis) ||
+      (navigator.maxTouchPoints > 0) ||
+      matchCoarse ||
+      matchSmall;
     this._isTouch = !!isTouch;
     if (!isTouch) {
       [this.touchBtnLeft, this.touchBtnRight, this.touchBtnJump, this.tapZone]
