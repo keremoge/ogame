@@ -268,12 +268,11 @@ export class GameScene extends Phaser.Scene {
     // Back limbs render BEHIND the body, front limbs in front of it. This
     // gives a tiny bit of perspective when arms swing past the torso.
     // EXCEPTION: the BACK arm is the one that holds the balloon strings,
-    // so we render it WAY in FRONT of the body (depth +3) — above the
-    // head image (depth +1) and the graduation gown (depth +2). Otherwise
-    // the hand gets hidden behind the sweater / face / gown and the
-    // strings appear to start from the kid's chest instead of his fist.
+    // so we render it in FRONT of the body (depth +1) — otherwise the
+    // hand is hidden behind the sweater and the strings appear to start
+    // from the kid's belly instead of his fist.
     this.limbBackLeg  = mkLimb('limb_leg', -1);
-    this.limbBackArm  = mkLimb('limb_arm',  3);
+    this.limbBackArm  = mkLimb('limb_arm',  1);
     this.limbFrontLeg = mkLimb('limb_leg',  0);
     this.limbFrontArm = mkLimb('limb_arm',  0);
     // Body shoulder / hip anchors in source-pixel coords (origin = 48,48).
@@ -543,25 +542,19 @@ export class GameScene extends Phaser.Scene {
 
     // ---- BACK ARM = balloon-holding hand --------------------------------
     // The trailing arm always grips the balloon strings, so we OVERRIDE
-    // whatever pose the state machine picked above. We want the hand to
-    // be UNAMBIGUOUSLY visible in front of the body so the strings
-    // clearly meet the fist (not disappear behind the sweater / head).
-    //
-    // Two tricks:
-    //   1. Use a LARGE forward angle (~78°) so the arm reaches out across
-    //      the body, putting the hand on the FACING side, past the torso
-    //      silhouette — it sticks out where you can see it.
-    //   2. Anchor the shoulder on the FRONT side of the torso (not the
-    //      back), so the elbow doesn't disappear into the body either.
-    //
-    // The arm still pumps with running cadence and reacts to jump/land.
+    // whatever pose the state machine picked above. The arm is held
+    // forward+up (hand in front of the chest, where the strings naturally
+    // funnel) and pumps with the run cadence so the player can clearly
+    // see the hand moving as they run. Other states (jump/land/fall)
+    // contribute a small extra modifier so the hand reacts but never
+    // "lets go" of the strings.
     const facingDirSign = facingLeft ? -1 : 1; // +1 = facing right
-    const HOLD_BASE = 78 * facingDirSign;      // big forward swing toward facing side
+    const HOLD_BASE = 42 * facingDirSign;      // hand swings to facing side
     let holdMod;
     if (this._landImpactT > 0)      holdMod = -10 * this._landImpactT * facingDirSign;
-    else if (!onGround && vy < -80) holdMod = -22 * facingDirSign; // arm lifts a bit on jump
-    else if (!onGround && vy >  80) holdMod =   8 * facingDirSign; // small drop on fall
-    else if (moving)                holdMod =  swing * 16 * runAmp * facingDirSign;
+    else if (!onGround && vy < -80) holdMod = -28 * facingDirSign; // arm lifts higher on jump
+    else if (!onGround && vy >  80) holdMod =  10 * facingDirSign; // small drop on fall
+    else if (moving)                holdMod =  swing * 18 * runAmp * facingDirSign;
     else                            holdMod =  Math.sin(time * 0.003) * 4;
     armBack = HOLD_BASE + holdMod;
 
@@ -584,12 +577,7 @@ export class GameScene extends Phaser.Scene {
     const hipFY = this.player.y + this.HIP_DY * scale - bob;
     const hipBY = hipFY;
     const shoulderFX = this.player.x + sgnFront *  this.SHOULDER_DX * scale;
-    // BACK shoulder for the balloon-holding arm: instead of placing it on
-    // the rear side of the torso (where the elbow would disappear into the
-    // body), pull it FORWARD to roughly the front-center of the torso so
-    // the whole forearm reads as being in front of the kid — fist clearly
-    // outside the silhouette, palm wrapped around the strings.
-    const shoulderBX = this.player.x + sgnFront *  this.SHOULDER_DX * 0.25 * scale;
+    const shoulderBX = this.player.x + sgnFront * -this.SHOULDER_DX * scale;
     const hipFX = this.player.x + sgnFront *  this.HIP_DX * scale;
     const hipBX = this.player.x + sgnFront * -this.HIP_DX * scale;
 
