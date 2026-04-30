@@ -384,14 +384,31 @@ export class CharacterSelectScene extends Phaser.Scene {
     this._setStatus('Yüz aranıyor…');
     let bestDet;
     try {
-      const detections = await window.faceapi
-        .detectAllFaces(
-          img,
-          new window.faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 })
-        )
-        .withFaceLandmarks(true /* useTinyModel */);
+      // Try several detector configurations in order of preference.
+      // Mobile CPUs choke on inputSize 416 with high-res phone photos, and
+      // a single failed pass should not kill the whole flow. We progressively
+      // relax the threshold and shrink the input until we find a face.
+      const passes = [
+        { inputSize: 416, scoreThreshold: 0.5 },
+        { inputSize: 320, scoreThreshold: 0.4 },
+        { inputSize: 256, scoreThreshold: 0.3 },
+        { inputSize: 224, scoreThreshold: 0.2 },
+      ];
+      let detections = null;
+      for (const opts of passes) {
+        try {
+          detections = await window.faceapi
+            .detectAllFaces(img, new window.faceapi.TinyFaceDetectorOptions(opts))
+            .withFaceLandmarks(true /* useTinyModel */);
+          if (detections && detections.length > 0) break;
+        } catch (passErr) {
+          // Some Android WebViews throw on large inputSize — try the next
+          // smaller pass instead of bailing out.
+          console.warn('face-api pass failed', opts, passErr);
+        }
+      }
       if (!detections || detections.length === 0) {
-        this._setStatus('Bu fotoğrafta yüz bulunamadı. Daha net bir fotoğraf dene.', 'error');
+        this._setStatus('Bu fotoğrafta yüz bulunamadı. Yüzün net görünen, yakın bir fotoğraf dene.', 'error');
         return;
       }
       // Largest box = closest to the camera.
@@ -401,7 +418,7 @@ export class CharacterSelectScene extends Phaser.Scene {
       );
     } catch (e) {
       console.error(e);
-      this._setStatus('Yüz tespiti sırasında hata oluştu.', 'error');
+      this._setStatus('Yüz tespiti sırasında hata oluştu: ' + (e && e.message ? e.message : e), 'error');
       return;
     }
 
@@ -411,7 +428,10 @@ export class CharacterSelectScene extends Phaser.Scene {
       segMask = await this._segmentPerson(img);
     } catch (e) {
       console.error(e);
-      this._setStatus('Arka plan kaldırılamadı.', 'error');
+      // Show the actual error so we can diagnose Android-specific issues
+      // (GPU shader compile, WASM fetch blocked, OOM, etc.).
+      const msg = e && e.message ? e.message : String(e);
+      this._setStatus('Arka plan kaldırılamadı: ' + msg, 'error');
       return;
     }
 
@@ -470,19 +490,58 @@ export class CharacterSelectScene extends Phaser.Scene {
       const fileset = await vision.FilesetResolver.forVisionTasks(
         'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
       );
-      this._segmenter = await vision.ImageSegmenter.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite',
-          delegate: 'GPU',
-        },
-        runningMode: 'IMAGE',
-        outputCategoryMask: true,
-        outputConfidenceMasks: false,
-      });
+      const modelAssetPath =
+        'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
+      // GPU delegate is much faster but is unreliable on many Android
+      // Chrome / WebView builds (TFLite GPU shader compile fails on some
+      // Mali / Adreno drivers) and on some desktop browsers without WebGL2.
+      // Try GPU first, then fall back to CPU so the user always gets a
+      // working segmenter rather than the generic "Arka plan kaldırılamadı".
+      try {
+        this._segmenter = await vision.ImageSegmenter.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath, delegate: 'GPU' },
+          runningMode: 'IMAGE',
+          outputCategoryMask: true,
+          outputConfidenceMasks: false,
+        });
+      } catch (gpuErr) {
+        console.warn('MediaPipe GPU delegate failed, retrying with CPU', gpuErr);
+        this._segmenter = await vision.ImageSegmenter.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath, delegate: 'CPU' },
+          runningMode: 'IMAGE',
+          outputCategoryMask: true,
+          outputConfidenceMasks: false,
+        });
+      }
     }
 
-    const result = this._segmenter.segment(img);
+    // The model is 256x256 — feeding it a huge phone photo (4000+ px) wastes
+    // CPU on the upload step and on Android can OOM the GPU delegate.
+    // Downscale to a sane working size first; the categoryMask is upscaled
+    // back to the source size at the end of this function anyway.
+    const MAX_SIDE = 1024;
+    let segInput = img;
+    if (img.width > MAX_SIDE || img.height > MAX_SIDE) {
+      const scale = MAX_SIDE / Math.max(img.width, img.height);
+      const sw = Math.max(1, Math.round(img.width * scale));
+      const sh = Math.max(1, Math.round(img.height * scale));
+      const small = document.createElement('canvas');
+      small.width = sw; small.height = sh;
+      small.getContext('2d').drawImage(img, 0, 0, sw, sh);
+      segInput = small;
+    }
+
+    let result;
+    try {
+      result = this._segmenter.segment(segInput);
+    } catch (segErr) {
+      // If the GPU runtime crashes mid-segment on Android, drop the
+      // segmenter and recreate it on CPU for the next call.
+      console.warn('MediaPipe segment() failed, dropping segmenter', segErr);
+      try { this._segmenter.close && this._segmenter.close(); } catch (_) { /* ignore */ }
+      this._segmenter = null;
+      throw segErr;
+    }
     const cat = result.categoryMask;
     const mw = cat.width, mh = cat.height;
     const catData = cat.getAsUint8Array();
