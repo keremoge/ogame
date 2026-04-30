@@ -267,8 +267,12 @@ export class GameScene extends Phaser.Scene {
       .setDepth(this.player.depth + depthOffset);
     // Back limbs render BEHIND the body, front limbs in front of it. This
     // gives a tiny bit of perspective when arms swing past the torso.
+    // EXCEPTION: the BACK arm is the one that holds the balloon strings,
+    // so we render it in FRONT of the body (depth +1) — otherwise the
+    // hand is hidden behind the sweater and the strings appear to start
+    // from the kid's belly instead of his fist.
     this.limbBackLeg  = mkLimb('limb_leg', -1);
-    this.limbBackArm  = mkLimb('limb_arm', -1);
+    this.limbBackArm  = mkLimb('limb_arm',  1);
     this.limbFrontLeg = mkLimb('limb_leg',  0);
     this.limbFrontArm = mkLimb('limb_arm',  0);
     // Body shoulder / hip anchors in source-pixel coords (origin = 48,48).
@@ -473,10 +477,10 @@ export class GameScene extends Phaser.Scene {
       this.limbBackArm.setVisible(false);
       this.limbFrontLeg.setVisible(false);
       this.limbBackLeg.setVisible(false);
-      const sgn = this.player.flipX ? -1 : 1;
-      // Sleeve cuff sits roughly at sweater waist level on either side.
-      this.HAND_LIVE_X = this.player.x + sgn * -this.SHOULDER_DX * this.PLAYER_SCALE;
-      this.HAND_LIVE_Y = this.player.y + 14 * this.PLAYER_SCALE;
+      // Anchor balloons at the gown's chest level so the strings still
+      // visibly come from the front of the kid (under his hand area).
+      this.HAND_LIVE_X = this.player.x;
+      this.HAND_LIVE_Y = this.player.y;
       return;
     }
     [this.limbFrontArm, this.limbBackArm, this.limbFrontLeg, this.limbBackLeg]
@@ -535,6 +539,24 @@ export class GameScene extends Phaser.Scene {
       armFront =  breathe; armBack = -breathe;
       legFront = 0; legBack = 0;
     }
+
+    // ---- BACK ARM = balloon-holding hand --------------------------------
+    // The trailing arm always grips the balloon strings, so we OVERRIDE
+    // whatever pose the state machine picked above. The arm is held
+    // forward+up (hand in front of the chest, where the strings naturally
+    // funnel) and pumps with the run cadence so the player can clearly
+    // see the hand moving as they run. Other states (jump/land/fall)
+    // contribute a small extra modifier so the hand reacts but never
+    // "lets go" of the strings.
+    const facingDirSign = facingLeft ? -1 : 1; // +1 = facing right
+    const HOLD_BASE = 42 * facingDirSign;      // hand swings to facing side
+    let holdMod;
+    if (this._landImpactT > 0)      holdMod = -10 * this._landImpactT * facingDirSign;
+    else if (!onGround && vy < -80) holdMod = -28 * facingDirSign; // arm lifts higher on jump
+    else if (!onGround && vy >  80) holdMod =  10 * facingDirSign; // small drop on fall
+    else if (moving)                holdMod =  swing * 18 * runAmp * facingDirSign;
+    else                            holdMod =  Math.sin(time * 0.003) * 4;
+    armBack = HOLD_BASE + holdMod;
 
     // Smooth toward targets so transitions don't pop.
     const lerp = Phaser.Math.Linear;
