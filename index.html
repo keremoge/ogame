@@ -24,8 +24,15 @@
         overscroll-behavior: none;
       }
       #game {
+        position: fixed;
+        inset: 0;
         width: 100vw;
-        height: 100vh;
+        /* `dvh` = dynamic viewport height: shrinks/grows as the mobile
+           browser URL bar slides in/out, so the canvas matches what the
+           user actually sees and the on-screen buttons never end up
+           hidden below the URL bar (Samsung Internet / Chrome Android). */
+        height: 100vh;        /* fallback for very old browsers */
+        height: 100dvh;
       }
       #game canvas {
         display: block;
@@ -37,6 +44,23 @@
     <div id="game"></div>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script>
+      // Mobile browsers (Samsung Internet, Chrome on Android) hide/show
+      // the URL bar dynamically and don't always fire `resize` on window
+      // when that happens. The visualViewport API does. Forward those
+      // events as window-resize so Phaser's Scale.RESIZE handler re-fits
+      // the canvas to the actual visible area.
+      (function () {
+        var vv = window.visualViewport;
+        if (!vv) return;
+        var fire = function () { window.dispatchEvent(new Event('resize')); };
+        vv.addEventListener('resize', fire);
+        vv.addEventListener('scroll', fire);
+        window.addEventListener('orientationchange', function () {
+          setTimeout(fire, 200);
+        });
+      })();
+    </script>
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

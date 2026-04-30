@@ -1547,10 +1547,16 @@ export class GameScene extends Phaser.Scene {
       btn._hit.setSize(r * 2, r * 2);
     };
 
-    // Left + right at bottom-left, jump at bottom-right.
-    drawBtn(this.touchBtnLeft,  m + r,             viewH - m - r);
-    drawBtn(this.touchBtnRight, m + r * 3 + g,     viewH - m - r);
-    drawBtn(this.touchBtnJump,  viewW - m - r,     viewH - m - r);
+    // Extra bottom padding so the buttons are never hidden under the
+    // mobile browser's URL bar / gesture pill (Samsung Internet, Chrome
+    // Android) even briefly while the bar animates. The visualViewport
+    // listener in index.html keeps the canvas size up to date, but a
+    // little safety margin avoids edge-case clipping.
+    const bottomSafe = m + Math.round(r * 0.4);
+    const yRow = viewH - bottomSafe - r;
+    drawBtn(this.touchBtnLeft,  m + r,             yRow);
+    drawBtn(this.touchBtnRight, m + r * 3 + g,     yRow);
+    drawBtn(this.touchBtnJump,  viewW - m - r,     yRow);
   }
 
   // ---- HUD card ----------------------------------------------------------
